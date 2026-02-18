@@ -1,55 +1,59 @@
-  <?php
-  require_once '../vendor/autoload.php';
-  require_once '../config/db.php';
+<?php
+declare(strict_types=1);
 
-  use Firebase\JWT\JWT;
+require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../config/db.php';
 
-  
+use Firebase\JWT\JWT;
 
-  /* INPUT */
-  $data = json_decode(file_get_contents("php://input"), true);
+// Always set headers BEFORE any output
+header('Content-Type: application/json; charset=UTF-8');
 
-  $username = trim($data['username'] ?? '');
-  $password = trim($data['password'] ?? '');
+function respond(int $code, array $payload): void {
+    http_response_code($code);
+    echo json_encode($payload);
+    exit;
+}
 
-  if ($username === '' || $password === '') {
-      http_response_code(400);
-      echo json_encode(["message" => "Missing credentials"]);
-      exit;
-  }
+/* INPUT */
+$raw = file_get_contents("php://input");
+$data = json_decode($raw, true);
 
-  /* USER */
-  $stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
-  $stmt->execute([$username]);
-  $user = $stmt->fetch(PDO::FETCH_ASSOC);
+$username = trim($data['username'] ?? '');
+$password = trim($data['password'] ?? '');
 
+if ($username === '' || $password === '') {
+    respond(400, ["message" => "Missing credentials"]);
+}
 
-  if (!$user || !password_verify($password, $user['password'])) {
-      http_response_code(401);
-      echo json_encode(["message" => "Invalid username or password"]);
-      exit;
-  }
+/* USER */
+$stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
+$stmt->execute([$username]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-  /* JWT */
-  $secretKey = 'CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#';
+if (!$user || !password_verify($password, $user['password'])) {
+    respond(401, ["message" => "Invalid username or password"]);
+}
 
-  $payload = [
+/* JWT */
+$secretKey = getenv('JWT_SECRET') ?: 'CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#';
+
+$payload = [
     "iss" => "my-app",
     "iat" => time(),
     "exp" => time() + 3600,
     "sub" => $user['users_id'],
     "username" => $user['username'],
-    "role" => $user['role'] // ✅ add this
-  ];
+    "role" => $user['role']
+];
 
-  $jwt = JWT::encode($payload, $secretKey, 'HS256');
+$jwt = JWT::encode($payload, $secretKey, 'HS256');
 
-  echo json_encode([
+respond(200, [
     "token" => $jwt,
     "user" => [
-      "id" => $user['users_id'],
-      "username" => $user['username'],
-      "role" => $user['role']
+        "id" => $user['users_id'],
+        "username" => $user['username'],
+        "role" => $user['role']
     ]
-  ]);
-
+]);
