@@ -1,13 +1,12 @@
 <?php
 
-require_once __DIR__ . '/env.php';
-loadEnv(__DIR__ . '/.env');
 
-$host   = $_ENV['DB_HOST'] ?? 'localhost';
-$port   = $_ENV['DB_PORT'] ?? '3306';
-$dbname = $_ENV['DB_NAME'] ?? '';
-$user   = $_ENV['DB_USER'] ?? '';
-$pass   = $_ENV['DB_PASS'] ?? '';
+
+$host   = getenv('DB_HOST') ?? 'localhost';
+$port   = getenv('DB_PORT') ?? '3306';
+$dbname = getenv('DB_NAME') ?? '';
+$user   = getenv('DB_USER') ?? '';
+$pass   = getenv('DB_PASS') ?? '';
 
 $options = [
     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
