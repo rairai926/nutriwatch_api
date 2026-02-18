@@ -1,25 +1,13 @@
 FROM php:8.3-apache
 
-# Enable rewrite + install PDO MySQL
+# Enable rewrite + install PHP extensions
 RUN a2enmod rewrite \
-  && docker-php-ext-install pdo pdo_mysql
-
-# Install system tools Composer needs (git + unzip) + CA certs
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends git unzip ca-certificates \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+      git unzip ca-certificates libzip-dev libcurl4-openssl-dev \
+  && docker-php-ext-install pdo pdo_mysql zip curl \
   && rm -rf /var/lib/apt/lists/*
 
-# Optional but good: enable PHP zip extension (helps Composer with dist zips)
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends libzip-dev \
-  && docker-php-ext-install zip \
-  && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends libcurl4-openssl-dev \
-  && docker-php-ext-install curl \
-  && rm -rf /var/lib/apt/lists/*
-  
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
@@ -33,4 +21,9 @@ RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoload
 # Permissions
 RUN chown -R www-data:www-data /var/www/html
 
+# --- Render PORT fix: bind Apache to $PORT at runtime ---
+RUN printf '#!/bin/sh\nset -e\n: "${PORT:=80}"\n# Make Apache listen on Render-provided PORT\nsed -i "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf\n# Update default vhost to match PORT\nsed -i "s/<VirtualHost \\*:80>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/000-default.conf\nexec apache2-foreground\n' > /usr/local/bin/render-start \
+  && chmod +x /usr/local/bin/render-start
+
 EXPOSE 80
+CMD ["render-start"]
