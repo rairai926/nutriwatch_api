@@ -1,59 +1,73 @@
 <?php
-declare(strict_types=1);
+  require_once '../vendor/autoload.php';
+  require_once '../config/db.php';
 
-require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../config/db.php';
+  use Firebase\JWT\JWT;
 
-use Firebase\JWT\JWT;
+  $allowedOrigins = [
+    "http://localhost:3000",
+    "https://nutriwatch-api.onrender.com/"
+  ];
 
-// Always set headers BEFORE any output
-header('Content-Type: application/json; charset=UTF-8');
+  $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+  if (in_array($origin, $allowedOrigins, true)) {
+    header("Access-Control-Allow-Origin: $origin");
+  }
 
-function respond(int $code, array $payload): void {
-    http_response_code($code);
-    echo json_encode($payload);
+  header("Access-Control-Allow-Headers: Content-Type, Authorization");
+  header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+  header("Content-Type: application/json");
+
+  if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
     exit;
-}
+  }
 
-/* INPUT */
-$raw = file_get_contents("php://input");
-$data = json_decode($raw, true);
 
-$username = trim($data['username'] ?? '');
-$password = trim($data['password'] ?? '');
+  /* INPUT */
+  $data = json_decode(file_get_contents("php://input"), true);
 
-if ($username === '' || $password === '') {
-    respond(400, ["message" => "Missing credentials"]);
-}
+  $username = trim($data['username'] ?? '');
+  $password = trim($data['password'] ?? '');
 
-/* USER */
-$stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
-$stmt->execute([$username]);
-$user = $stmt->fetch(PDO::FETCH_ASSOC);
+  if ($username === '' || $password === '') {
+      http_response_code(400);
+      echo json_encode(["message" => "Missing credentials"]);
+      exit;
+  }
 
-if (!$user || !password_verify($password, $user['password'])) {
-    respond(401, ["message" => "Invalid username or password"]);
-}
+  /* USER */
+  $stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
+  $stmt->execute([$username]);
+  $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-/* JWT */
-$secretKey = getenv('JWT_SECRET') ?: 'CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#';
 
-$payload = [
+  if (!$user || !password_verify($password, $user['password'])) {
+      http_response_code(401);
+      echo json_encode(["message" => "Invalid username or password"]);
+      exit;
+  }
+
+  /* JWT */
+  $secretKey = 'CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#';
+
+  $payload = [
     "iss" => "my-app",
     "iat" => time(),
     "exp" => time() + 3600,
     "sub" => $user['users_id'],
     "username" => $user['username'],
-    "role" => $user['role']
-];
+    "role" => $user['role'] // ✅ add this
+  ];
 
-$jwt = JWT::encode($payload, $secretKey, 'HS256');
+  $jwt = JWT::encode($payload, $secretKey, 'HS256');
 
-respond(200, [
+  echo json_encode([
     "token" => $jwt,
     "user" => [
-        "id" => $user['users_id'],
-        "username" => $user['username'],
-        "role" => $user['role']
+      "id" => $user['users_id'],
+      "username" => $user['username'],
+      "role" => $user['role']
     ]
-]);
+  ]);
+
