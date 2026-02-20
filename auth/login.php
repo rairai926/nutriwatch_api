@@ -1,14 +1,7 @@
 <?php
-  $allowedOrigins = [
-    "http://localhost:3000",
-    "https://nutriwatch-api.onrender.com/"
-  ];
+  ob_start(); // optional safety
 
-  $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-  if (in_array($origin, $allowedOrigins, true)) {
-    header("Access-Control-Allow-Origin: $origin");
-  }
-
+  header("Access-Control-Allow-Origin: *");
   header("Access-Control-Allow-Headers: Content-Type, Authorization");
   header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
   header("Content-Type: application/json");
@@ -17,7 +10,6 @@
     http_response_code(200);
     exit;
   }
-
 
   require_once '../vendor/autoload.php';
   require_once '../config/db.php';
