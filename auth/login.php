@@ -1,9 +1,4 @@
 <?php
-  require_once '../vendor/autoload.php';
-  require_once '../config/db.php';
-
-  use Firebase\JWT\JWT;
-
   $allowedOrigins = [
     "http://localhost:3000",
     "https://nutriwatch-api.onrender.com/"
@@ -22,6 +17,12 @@
     http_response_code(200);
     exit;
   }
+
+
+  require_once '../vendor/autoload.php';
+  require_once '../config/db.php';
+
+  use Firebase\JWT\JWT;
 
 
   /* INPUT */
