@@ -1,31 +1,23 @@
 <?php
+
+  ob_start(); // optional safety
+
+  header("Access-Control-Allow-Origin: *");
+  header("Access-Control-Allow-Headers: Content-Type, Authorization");
+  header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+  header("Content-Type: application/json");
+
+  if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+  }
+  
 require_once '../vendor/autoload.php';
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
 /* ================== HEADERS ================== */
-$allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://192.168.1.36:3000",
-  "http://172.77.4.94:3000"
-];
-
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins, true)) {
-  header("Access-Control-Allow-Origin: $origin");
-}
-
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Content-Type: application/json");
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-  http_response_code(200);
-  exit;
-}
-
 
 /* ================== TOKEN ================== */
 $headers = getallheaders();
