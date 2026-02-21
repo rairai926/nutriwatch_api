@@ -15,21 +15,31 @@ RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
+
+# Copy composer files first (better build cache + ensures deps install correctly)
+COPY composer.json composer.lock* ./
+
+# Install PHP deps and verify firebase/php-jwt exists
+RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader \
+ && composer show firebase/php-jwt \
+ && php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('Firebase\\\\JWT\\\\JWT') ? 'JWT OK' : 'JWT MISSING';"
+
+# Copy the rest of the app
 COPY . .
 
-RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
-
+# Permissions
 RUN chown -R www-data:www-data /var/www/html
 
-# Create startup script properly
-RUN echo '#!/bin/sh' > /usr/local/bin/render-start && \
-    echo 'set -e' >> /usr/local/bin/render-start && \
-    echo 'PORT=${PORT:-10000}' >> /usr/local/bin/render-start && \
-    echo 'echo "Using PORT=$PORT"' >> /usr/local/bin/render-start && \
-    echo 'sed -i "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf' >> /usr/local/bin/render-start && \
-    echo 'sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/000-default.conf' >> /usr/local/bin/render-start && \
-    echo 'exec apache2-foreground' >> /usr/local/bin/render-start && \
-    chmod +x /usr/local/bin/render-start
+# Render start script (bind Apache to $PORT)
+RUN printf '%s\n' \
+'#!/bin/sh' \
+'set -e' \
+'PORT=${PORT:-10000}' \
+'echo "Using PORT=$PORT"' \
+'sed -i "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf' \
+'sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:${PORT}>/" /etc/apache2/sites-available/000-default.conf' \
+'exec apache2-foreground' \
+> /usr/local/bin/render-start && chmod +x /usr/local/bin/render-start
 
 EXPOSE 80
 CMD ["/usr/local/bin/render-start"]
