@@ -14,7 +14,8 @@
   require_once __DIR__ .'/../vendor/autoload.php';
   require_once __DIR__ .'/../config/db.php';
 
-  use Firebase\JWT\JWT;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 
   /* INPUT */
