@@ -1,17 +1,31 @@
 <?php
-
+ob_start();
 session_start();
-ob_start(); // optional safety
 
-  header("Access-Control-Allow-Origin: *");
-  header("Access-Control-Allow-Headers: Content-Type, Authorization");
-  header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-  header("Content-Type: application/json");
+header("Content-Type: application/json; charset=utf-8");
 
-  if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-  }
+// --------------------
+// CORS (must NOT be * if using withCredentials)
+// --------------------
+$allowedOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://192.168.1.36:3000"
+];
+
+$origin = $_SERVER["HTTP_ORIGIN"] ?? "";
+if ($origin && in_array($origin, $allowedOrigins, true)) {
+  header("Access-Control-Allow-Origin: $origin");
+  header("Access-Control-Allow-Credentials: true");
+}
+
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+
+if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+  http_response_code(200);
+  exit;
+}
 
 require_once __DIR__ . "/../vendor/autoload.php";
 require_once __DIR__ . "/../config/db.php";
@@ -19,10 +33,13 @@ require_once __DIR__ . "/../config/db.php";
 use Firebase\JWT\JWT;
 
 // --------------------
-// Settings
+// Settings (NOW from ENV)
 // --------------------
-$FAIL_RESET_MINUTES = 10;   // ✅ Auto reset after 10 minutes
-$FAIL_CAPTCHA_THRESHOLD = 2; // ✅ show captcha after 2 failed attempts
+$FAIL_RESET_MINUTES = getenv("FAIL_RESET_MINUTES");
+$FAIL_RESET_MINUTES = is_numeric($FAIL_RESET_MINUTES) ? (int)$FAIL_RESET_MINUTES : 10; // default 10
+if ($FAIL_RESET_MINUTES < 1) $FAIL_RESET_MINUTES = 1;
+
+$FAIL_CAPTCHA_THRESHOLD = 2; // show captcha after 2 failed attempts
 
 // --------------------
 // Helpers
@@ -79,7 +96,6 @@ function get_fail_count(PDO $pdo, string $username, string $ip, int $resetMinute
   $failCount = (int)$row["fail_count"];
   $lastFailedAt = strtotime($row["last_failed_at"] ?? "");
 
-  // If last_failed_at invalid -> reset for safety
   if (!$lastFailedAt) {
     $del = $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?");
     $del->execute([$username, $ip]);
@@ -89,7 +105,6 @@ function get_fail_count(PDO $pdo, string $username, string $ip, int $resetMinute
   $ageSeconds = time() - $lastFailedAt;
   $resetSeconds = $resetMinutes * 60;
 
-  // ✅ auto reset if too old
   if ($ageSeconds > $resetSeconds) {
     $del = $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?");
     $del->execute([$username, $ip]);
@@ -144,7 +159,6 @@ if (!isset($_SESSION["captcha_decided"])) {
   $_SESSION["captcha_decided"] = true;
   $_SESSION["captcha_decided_at"] = time();
 } else {
-  // if threshold reached later, enforce it
   if ($requireByFails) $_SESSION["captcha_required"] = true;
 }
 
@@ -183,17 +197,15 @@ if ($captchaRequired) {
 }
 
 // --------------------
-// USER AUTH (your existing logic)
+// USER AUTH
 // --------------------
 $stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
 $stmt->execute([$username]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$user || !password_verify($password, $user["password"])) {
-  // increment fail count
   inc_fail_count($pdo, $username, $ip);
 
-  // re-check fail count (auto reset-aware)
   $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
   $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
 
