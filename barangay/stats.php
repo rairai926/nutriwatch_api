@@ -3,7 +3,7 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
 // allow logged-in users (adjust roles if needed)
-$user = authenticate(['admin', 'user']);
+//$user = authenticate(['admin', 'user']);
 
 header("Content-Type: application/json; charset=utf-8");
 
