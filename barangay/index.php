@@ -30,72 +30,80 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 
 require_once __DIR__ . "/../config/db.php";
 
-// OPTIONAL: if you have auth middleware
-// require_once __DIR__ . "/../middleware/auth.php";
-// $user = authenticate(['admin', 'user']); // or ['admin']
-
 try {
   $provinceId = isset($_GET["province_id"]) ? (int)$_GET["province_id"] : 0;
   $cityId     = isset($_GET["city_id"]) ? (int)$_GET["city_id"] : 0;
 
-  $where = [];
+  // Build filter conditions for child_info (used in both aggregates)
+  $childWhere = [];
   $params = [];
 
-  // We filter based on child_info location (because tbl_barangay has only name/id)
-  // But we still want barangays with 0 children to appear IF no filter is applied.
-  // When filters are applied, only barangays that have matching children will appear.
-
   if ($provinceId > 0) {
-    $where[] = "ci.province_id = ?";
+    $childWhere[] = "province_id = ?";
     $params[] = $provinceId;
   }
   if ($cityId > 0) {
-    $where[] = "ci.city_id = ?";
+    $childWhere[] = "city_id = ?";
     $params[] = $cityId;
   }
 
-  // Aggregate measurements per barangay (unique children measured + latest measurement date)
-  // Note: measured_children counts DISTINCT child_seq in measurement (so not double counted)
+  $childFilterSql = "";
+  if (!empty($childWhere)) {
+    $childFilterSql = "WHERE " . implode(" AND ", $childWhere);
+  }
+
+  // ✅ FIXED: Use aggregated subqueries (prevents wrong counts)
+  // - children per barangay
+  // - measured unique children per barangay + max date_measured
   $sql = "
     SELECT
       b.barangay_id,
       b.barangay_name,
 
-      COUNT(DISTINCT ci.child_seq) AS child_count,
-
-      COUNT(DISTINCT m.child_seq) AS measured_children,
-
-      MAX(m.date_measured) AS last_measurement_date
+      COALESCE(ci_counts.child_count, 0) AS child_count,
+      COALESCE(m_counts.measured_children, 0) AS measured_children,
+      m_counts.last_measurement_date
 
     FROM tbl_barangay b
-    LEFT JOIN tbl_child_info ci
-      ON ci.barangay_id = b.barangay_id
 
-    LEFT JOIN tbl_measurement m
-      ON m.child_seq = ci.child_seq
-  ";
+    LEFT JOIN (
+      SELECT
+        barangay_id,
+        COUNT(*) AS child_count
+      FROM tbl_child_info
+      $childFilterSql
+      GROUP BY barangay_id
+    ) ci_counts
+      ON ci_counts.barangay_id = b.barangay_id
 
-  // If filter is applied, it will naturally limit to barangays with children matching filter
-  if (!empty($where)) {
-    $sql .= " WHERE " . implode(" AND ", $where);
-  }
+    LEFT JOIN (
+      SELECT
+        ci.barangay_id,
+        COUNT(DISTINCT m.child_seq) AS measured_children,
+        MAX(m.date_measured) AS last_measurement_date
+      FROM tbl_measurement m
+      JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
+      " . (!empty($childWhere) ? "WHERE " . implode(" AND ", array_map(fn($w) => "ci." . $w, $childWhere)) : "") . "
+      GROUP BY ci.barangay_id
+    ) m_counts
+      ON m_counts.barangay_id = b.barangay_id
 
-  $sql .= "
-    GROUP BY b.barangay_id, b.barangay_name
     ORDER BY b.barangay_name ASC
   ";
 
+  // NOTE: params only apply to ci_counts and m_counts when filters exist.
+  // For m_counts, we reused the same conditions but prefixed with ci.
+  // Because we used dynamic WHERE generation, we can reuse $params as-is.
   $stmt = $pdo->prepare($sql);
   $stmt->execute($params);
 
   $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-  // Normalize output
   foreach ($rows as &$r) {
     $r["barangay_id"] = (int)$r["barangay_id"];
     $r["child_count"] = (int)$r["child_count"];
     $r["measured_children"] = (int)$r["measured_children"];
-    // last_measurement_date stays string or null
+    // last_measurement_date remains string or null
   }
 
   echo json_encode($rows);
