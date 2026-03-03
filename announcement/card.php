@@ -2,6 +2,7 @@
 ob_start(); session_start();
 header("Content-Type: application/json; charset=utf-8");
 
+// CORS
 $allowedOrigins = ["http://localhost:3000","http://127.0.0.1:3000","https://nutriwatch.com","http://192.168.1.36:3000"];
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
 if ($origin && in_array($origin, $allowedOrigins, true)) {
@@ -19,8 +20,7 @@ $authUser = authenticate(['admin','user']);
 $role = $authUser->role ?? 'user';
 $userId = (int)($authUser->sub ?? 0);
 
-$today = date('Y-m-d');
-
+// BNS scope
 $barangayId = 0;
 if ($role !== 'admin') {
   $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
@@ -29,30 +29,45 @@ if ($role !== 'admin') {
   if ($barangayId <= 0) { http_response_code(403); echo json_encode(["message"=>"No barangay assigned"]); exit; }
 }
 
-if ($role === 'admin') {
-  $sql = "
-    SELECT a.*,
-      EXISTS(SELECT 1 FROM tbl_announcement_reads r WHERE r.announcement_id=a.announcement_id AND r.users_id=?) AS is_read
-    FROM tbl_announcement a
-    WHERE a.date_start <= ? AND a.date_end >= ?
-    ORDER BY a.date_posted DESC
-    LIMIT 1
-  ";
-  $stmt = $pdo->prepare($sql);
-  $stmt->execute([$userId, $today, $today]);
-  echo json_encode($stmt->fetch(PDO::FETCH_ASSOC) ?: []);
-  exit;
+// ✅ Use full datetime for accurate matching
+$now = date('Y-m-d H:i:s');
+
+$scopeSql = "";
+$params = [$userId, $now, $now];
+
+if ($role !== 'admin') {
+  $scopeSql = " AND (a.is_global=1 OR (a.is_global=0 AND a.barangay_id=?)) ";
+  $params[] = $barangayId;
 }
 
 $sql = "
-  SELECT a.*,
-    EXISTS(SELECT 1 FROM tbl_announcement_reads r WHERE r.announcement_id=a.announcement_id AND r.users_id=?) AS is_read
+  SELECT
+    a.announcement_id,
+    a.announcement_title AS title,
+    a.message,
+    a.date_start,
+    a.time_start,
+    a.date_end,
+    a.time_end,
+    a.date_posted,
+    a.venue,
+    a.is_global,
+    a.barangay_id,
+    a.active,
+    EXISTS(
+      SELECT 1 FROM tbl_announcement_reads r
+      WHERE r.announcement_id=a.announcement_id AND r.users_id=?
+    ) AS is_read
   FROM tbl_announcement a
-  WHERE a.date_start <= ? AND a.date_end >= ?
-    AND (a.is_global=1 OR (a.is_global=0 AND a.barangay_id=?))
+  WHERE a.active = 1
+    AND TIMESTAMP(a.date_start, COALESCE(a.time_start,'00:00:00')) <= ?
+    AND TIMESTAMP(a.date_end,   COALESCE(a.time_end,'23:59:59')) >= ?
+    $scopeSql
   ORDER BY a.date_posted DESC
   LIMIT 1
 ";
+
 $stmt = $pdo->prepare($sql);
-$stmt->execute([$userId, $today, $today, $barangayId]);
+$stmt->execute($params);
+
 echo json_encode($stmt->fetch(PDO::FETCH_ASSOC) ?: []);
