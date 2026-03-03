@@ -1,12 +1,18 @@
 <?php
-require_once '../config/db.php';
-require_once '../middleware/auth.php';
+require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../middleware/auth.php';
+
+$authUser = authenticate(['admin', 'user']);
 
 $id = (int)($_POST['users_id'] ?? 0);
-if ($id <= 0) { http_response_code(400); echo json_encode(["message"=>"Missing users_id"]); exit; }
+if ($id <= 0) {
+  http_response_code(400);
+  echo json_encode(["message" => "Missing users_id"]);
+  exit;
+}
 
-$isAdmin = $authUser->role === 'admin';
-$isSelf  = (int)$authUser->sub === $id;
+$isAdmin = (($authUser->role ?? '') === 'admin');
+$isSelf  = ((int)($authUser->sub ?? 0) === $id);
 
 if (!$isAdmin && !$isSelf) {
   http_response_code(403);
@@ -36,7 +42,7 @@ if (!empty($_FILES['photo']['name'])) {
   if (!is_dir($dir)) mkdir($dir, 0777, true);
 
   $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-  $allowed = ['jpg','jpeg','png','webp'];
+  $allowed = ['jpg', 'jpeg', 'png', 'webp'];
   if (!in_array($ext, $allowed, true)) {
     http_response_code(400);
     echo json_encode(["message" => "Invalid photo type"]);
@@ -45,26 +51,42 @@ if (!empty($_FILES['photo']['name'])) {
 
   $filename = 'user_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
   $target = $dir . $filename;
+
   if (!move_uploaded_file($_FILES['photo']['tmp_name'], $target)) {
     http_response_code(500);
     echo json_encode(["message" => "Photo upload failed"]);
     exit;
   }
+
   $photoPath = 'uploads/users/' . $filename;
 }
 
-$fields = ["lastname=?", "firstname=?", "middlename=?", "email=?", "username=?"];
-$params = [$lastname, $firstname, $middlename, $email, $username];
+$fields = [];
+$params = [];
 
-if ($isAdmin && $role !== '') { $fields[] = "role=?"; $params[] = $role; }
-if ($isAdmin && $barangayId > 0) { $fields[] = "barangay_id=?"; $params[] = $barangayId; }
-if ($isAdmin && $status !== '') { $fields[] = "status=?"; $params[] = $status; }
-if ($hash) { $fields[] = "password=?"; $params[] = $hash; }
-if ($photoPath) { $fields[] = "photo=?"; $params[] = $photoPath; }
+// allow empty fields? usually NO — so update only provided fields (recommended)
+if ($lastname !== '')   { $fields[] = "lastname=?";   $params[] = $lastname; }
+if ($firstname !== '')  { $fields[] = "firstname=?";  $params[] = $firstname; }
+if ($middlename !== '') { $fields[] = "middlename=?"; $params[] = $middlename; }
+if ($email !== '')      { $fields[] = "email=?";      $params[] = $email; }
+if ($username !== '')   { $fields[] = "username=?";   $params[] = $username; }
+
+if ($isAdmin && $role !== '')        { $fields[] = "role=?";        $params[] = $role; }
+if ($isAdmin && $barangayId > 0)     { $fields[] = "barangay_id=?"; $params[] = $barangayId; }
+if ($isAdmin && $status !== '')      { $fields[] = "status=?";      $params[] = $status; }
+
+if ($hash)      { $fields[] = "password=?"; $params[] = $hash; }
+if ($photoPath) { $fields[] = "photo=?";    $params[] = $photoPath; }
+
+if (empty($fields)) {
+  http_response_code(400);
+  echo json_encode(["message" => "No fields to update"]);
+  exit;
+}
 
 $params[] = $id;
 
-$sql = "UPDATE tbl_users SET " . implode(',', $fields) . " WHERE users_id=?";
+$sql = "UPDATE tbl_users SET " . implode(", ", $fields) . " WHERE users_id=?";
 $pdo->prepare($sql)->execute($params);
 
 echo json_encode(["message" => "User updated successfully"]);
