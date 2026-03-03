@@ -28,7 +28,7 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 
 require_once __DIR__ . "/../config/db.php";
 
-// OPTIONAL auth (enable if you have middleware/auth.php)
+// OPTIONAL auth
 // require_once __DIR__ . "/../middleware/auth.php";
 // $user = authenticate(['admin', 'user']);
 
@@ -40,21 +40,23 @@ if ($barangayId <= 0) {
 }
 
 try {
-  // Adjust column names if yours differ
   $sql = "
     SELECT
-      c.child_seq,
-      c.child_id,
-      c.child_name,
-      c.sex,
-      c.birthdate,
-      c.guardian_name,
-      c.purok,
-      b.barangay_name
-    FROM tbl_child_info c
-    JOIN tbl_barangay b ON b.barangay_id = c.barangay_id
-    WHERE c.barangay_id = ?
-    ORDER BY c.child_name ASC
+      child_seq,
+      purok,
+      c_firstname,
+      c_middlename,
+      c_lastname,
+      g_firstname,
+      g_middlename,
+      g_lastname,
+      sex,
+      date_birth,
+      disability,
+      ip_group
+    FROM tbl_child_info
+    WHERE barangay_id = ?
+    ORDER BY c_lastname ASC, c_firstname ASC
   ";
 
   $stmt = $pdo->prepare($sql);
