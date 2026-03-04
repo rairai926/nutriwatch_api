@@ -31,8 +31,8 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
 
-$authUser = authenticate(['admin', 'user']);
-$role = $authUser->role ?? 'user';
+$authUser = authenticate(['admin', 'user', 'bns']); // allow bns too (safe)
+$role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
 // --------------------
@@ -46,8 +46,7 @@ if (!in_array($metric, $allowed, true)) {
   exit;
 }
 
-// BNS scope (optional)
-// If you want BNS to only see their barangay on map set to true
+// If you want BNS to only see their barangay on map, set true:
 $restrictToBarangay = false;
 
 $barangayId = 0;
@@ -55,7 +54,8 @@ if ($role !== 'admin') {
   $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
   $st->execute([$userId]);
   $barangayId = (int)($st->fetchColumn() ?: 0);
-  if ($barangayId <= 0) {
+
+  if ($restrictToBarangay && $barangayId <= 0) {
     http_response_code(403);
     echo json_encode(["message" => "No barangay assigned"]);
     exit;
@@ -82,9 +82,7 @@ if ($metric === "muac_status") {
 }
 
 // --------------------
-// Latest measurement per child:
-// 1) max date_measured per child
-// 2) if multiple on same date, use max measure_id
+// Latest measurement per child (date + tie-breaker measure_id)
 // --------------------
 $latestJoin = "
   JOIN (
@@ -107,8 +105,9 @@ $latestTieBreaker = "
 ";
 
 // --------------------
-// 1) Base barangay list + child totals + assigned BNS
-// barangay_code matches GeoJSON properties.Bgy_Code
+// Barangay base list + counts + assigned BNS
+// IMPORTANT: clean barangay_code (remove \r\n spaces)
+// IMPORTANT: role for BNS might be 'bns' OR 'user' in your system
 // --------------------
 $whereBarangay = "";
 $params = [];
@@ -126,13 +125,14 @@ $barangaySql = "
 
     MAX(
       CASE
-        WHEN u.role = 'user' AND u.status = 'active'
+        WHEN LOWER(u.role) IN ('user','bns') AND (u.status IS NULL OR u.status = 'active' OR u.status = 1)
         THEN CONCAT(u.lastname, ', ', u.firstname, IFNULL(CONCAT(' ', u.middlename), ''))
         ELSE NULL
       END
     ) AS assigned_bns,
 
     COUNT(DISTINCT ci.child_seq) AS total_children,
+
     COUNT(DISTINCT CASE WHEN LOWER(ci.sex) IN ('m','male','boy','boys') THEN ci.child_seq END) AS male_children,
     COUNT(DISTINCT CASE WHEN LOWER(ci.sex) IN ('f','female','girl','girls') THEN ci.child_seq END) AS female_children
 
@@ -152,13 +152,17 @@ $st = $pdo->prepare($barangaySql);
 $st->execute($params);
 $barangays = $st->fetchAll(PDO::FETCH_ASSOC);
 
-// Build output keyed by barangay_id
+// output keyed by barangay_id
 $byId = [];
 foreach ($barangays as $b) {
   $id = (int)$b["barangay_id"];
+
+  // ✅ Strong cleaning: remove ANY whitespace and upper
+  $cleanCode = strtoupper(preg_replace('/\s+/u', '', (string)($b["barangay_code"] ?? "")));
+
   $byId[$id] = [
     "barangay_id" => $id,
-    "barangay_code" => trim((string)($b["barangay_code"] ?? "")),
+    "barangay_code" => $cleanCode,
     "barangay_name" => $b["barangay_name"] ?? "",
 
     "assigned_bns" => $b["assigned_bns"] ?? "",
@@ -182,12 +186,12 @@ if (!$byId) {
   exit;
 }
 
-// --------------------
-// 2) Metric breakdown (latest per child) per barangay
-// --------------------
 $ids = array_keys($byId);
 $placeholders = implode(",", array_fill(0, count($ids), "?"));
 
+// --------------------
+// Breakdown counts per barangay (latest per child)
+// --------------------
 $metricSql = "
   SELECT
     ci.barangay_id,
@@ -206,7 +210,7 @@ $st = $pdo->prepare($metricSql);
 $st->execute($ids);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-$tmpAgg = []; // barangay_id => { measured, last, breakdown[] }
+$tmpAgg = [];
 foreach ($rows as $r) {
   $bid = (int)$r["barangay_id"];
   if (!isset($tmpAgg[$bid])) {
@@ -227,7 +231,7 @@ foreach ($rows as $r) {
 }
 
 // --------------------
-// 3) Accurate normal_count per barangay (latest per child)
+// Normal counts per barangay (latest per child)
 // --------------------
 $normalSql = "
   SELECT
@@ -251,7 +255,7 @@ foreach ($normalRows as $nr) {
 }
 
 // --------------------
-// 4) Merge into output
+// Merge
 // --------------------
 foreach ($byId as $bid => &$out) {
   if (isset($tmpAgg[$bid])) {
@@ -262,7 +266,6 @@ foreach ($byId as $bid => &$out) {
     $out["last_measurement_date"] = $tmpAgg[$bid]["last"];
     $out["normal_pct"] = $measured > 0 ? round(($normal / $measured) * 100, 1) : 0;
 
-    // sort breakdown: highest count first
     usort($tmpAgg[$bid]["breakdown"], fn($a, $b) => $b["total"] <=> $a["total"]);
     $out["breakdowns"][$metric] = $tmpAgg[$bid]["breakdown"];
   }
