@@ -124,7 +124,6 @@ $barangaySql = "
     b.barangay_code,
     b.barangay_name,
 
-    -- Assigned BNS (one active user per barangay; if multiple, we take MAX name)
     MAX(
       CASE
         WHEN u.role = 'user' AND u.status = 'active'
@@ -133,9 +132,9 @@ $barangaySql = "
       END
     ) AS assigned_bns,
 
-    COUNT(ci.child_seq) AS total_children,
-    SUM(CASE WHEN LOWER(ci.sex) IN ('m','male','boy','boys') THEN 1 ELSE 0 END) AS male_children,
-    SUM(CASE WHEN LOWER(ci.sex) IN ('f','female','girl','girls') THEN 1 ELSE 0 END) AS female_children
+    COUNT(DISTINCT ci.child_seq) AS total_children,
+    COUNT(DISTINCT CASE WHEN LOWER(ci.sex) IN ('m','male','boy','boys') THEN ci.child_seq END) AS male_children,
+    COUNT(DISTINCT CASE WHEN LOWER(ci.sex) IN ('f','female','girl','girls') THEN ci.child_seq END) AS female_children
 
   FROM tbl_barangay b
   LEFT JOIN tbl_child_info ci
@@ -159,7 +158,7 @@ foreach ($barangays as $b) {
   $id = (int)$b["barangay_id"];
   $byId[$id] = [
     "barangay_id" => $id,
-    "barangay_code" => (string)($b["barangay_code"] ?? ""),
+    "barangay_code" => trim((string)($b["barangay_code"] ?? "")),
     "barangay_name" => $b["barangay_name"] ?? "",
 
     "assigned_bns" => $b["assigned_bns"] ?? "",
