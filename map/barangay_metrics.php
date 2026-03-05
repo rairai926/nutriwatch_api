@@ -47,7 +47,7 @@ if (!in_array($metric, $allowed, true)) {
 }
 
 // If you want BNS to only see their barangay on map, set true:
-$restrictToBarangay = false;
+$restrictToBarangay = true;
 
 $barangayId = 0;
 if ($role !== 'admin') {
