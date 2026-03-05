@@ -42,23 +42,23 @@ $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
 // --------------------
-// Pagination + filters
+// Params (MATCH your React)
+// view: all | updated | outdated | archive
 // --------------------
+$view = trim($_GET['view'] ?? 'all');
+$allowedViews = ['all', 'updated', 'outdated', 'archive'];
+if (!in_array($view, $allowedViews, true)) $view = 'all';
+
 $page  = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
-
 if ($page < 1) $page = 1;
 if ($limit < 1) $limit = 1;
 if ($limit > 100) $limit = 100;
 
 $offset = ($page - 1) * $limit;
 
-$view = trim($_GET['view'] ?? 'overall');
-$allowedViews = ['overall', 'updated_this_month', 'outdated_this_month', 'archives'];
-if (!in_array($view, $allowedViews, true)) $view = 'overall';
-
 // --------------------
-// Scope (user/bns only their barangay)
+// Restrict for non-admin to their barangay
 // --------------------
 $userBarangayId = 0;
 if ($role !== 'admin') {
@@ -74,81 +74,55 @@ if ($role !== 'admin') {
 }
 
 // --------------------
-// Date boundaries (this month)
+// Month boundaries
 // --------------------
 $firstDay = date('Y-m-01');
 $nextMonthFirstDay = date('Y-m-01', strtotime('+1 month', strtotime($firstDay)));
 
 // --------------------
-// Helpers for WHERE clause
+// ARCHIVE VIEW (tbl_child_archive) — MATCH fields your table uses
 // --------------------
-$where = [];
-$params = [];
-
-// barangay restriction
-if ($role !== 'admin') {
-  $where[] = "ci.barangay_id = ?";
-  $params[] = $userBarangayId;
-}
-
-// view logic (based on latest measurement date per child)
-$viewWhere = "";
-if ($view === 'updated_this_month') {
-  // last_measured in [firstDay, nextMonthFirstDay)
-  $viewWhere = " AND lm.last_measured >= ? AND lm.last_measured < ? ";
-  $params[] = $firstDay;
-  $params[] = $nextMonthFirstDay;
-} elseif ($view === 'outdated_this_month') {
-  // last_measured is NULL OR < firstDay
-  $viewWhere = " AND (lm.last_measured IS NULL OR lm.last_measured < ?) ";
-  $params[] = $firstDay;
-}
-
-// --------------------
-// ARCHIVES view (tbl_child_archive)
-// --------------------
-if ($view === 'archives') {
-  $whereA = [];
-  $paramsA = [];
+if ($view === 'archive') {
+  $where = [];
+  $params = [];
 
   if ($role !== 'admin') {
-    $whereA[] = "ca.barangay_id = ?";
-    $paramsA[] = $userBarangayId;
+    $where[] = "ca.barangay_id = ?";
+    $params[] = $userBarangayId;
   }
 
-  $whereSqlA = $whereA ? ("WHERE " . implode(" AND ", $whereA)) : "";
+  $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 
-  // count
-  $countSql = "
-    SELECT COUNT(*) 
-    FROM tbl_child_archive ca
-    $whereSqlA
-  ";
+  // total
+  $countSql = "SELECT COUNT(*) FROM tbl_child_archive ca $whereSql";
   $st = $pdo->prepare($countSql);
-  $st->execute($paramsA);
+  $st->execute($params);
   $total = (int)$st->fetchColumn();
 
-  // list
+  // rows (return c_* fields + purok + barangay_name + last_updated)
   $listSql = "
     SELECT
-      ca.archived_id AS id,
-      CONCAT_WS(' ', ca.c_firstname, ca.c_middlename, ca.c_lastname) AS full_name,
-      CONCAT_WS(', ', NULLIF(ca.purok,''), b.barangay_name) AS address,
+      ca.archived_id,
+      ca.c_firstname,
+      ca.c_middlename,
+      ca.c_lastname,
       ca.sex,
-      ca.date_birth,
+      ca.purok,
+      b.barangay_name,
       NULL AS last_updated
     FROM tbl_child_archive ca
     LEFT JOIN tbl_barangay b ON b.barangay_id = ca.barangay_id
-    $whereSqlA
+    $whereSql
     ORDER BY ca.archived_id DESC
     LIMIT $limit OFFSET $offset
   ";
   $st = $pdo->prepare($listSql);
-  $st->execute($paramsA);
+  $st->execute($params);
   $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
   echo json_encode([
     "ok" => true,
+    "message" => "OK",
     "view" => $view,
     "page" => $page,
     "limit" => $limit,
@@ -159,11 +133,33 @@ if ($view === 'archives') {
 }
 
 // --------------------
-// ACTIVE children views (tbl_child_info) + last measurement
+// ACTIVE LIST (tbl_child_info) + latest measurement date as last_updated
+// For updated/outdated: filter using latest measurement date per child
 // --------------------
+$where = [];
+$params = [];
+
+if ($role !== 'admin') {
+  $where[] = "ci.barangay_id = ?";
+  $params[] = $userBarangayId;
+}
+
 $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 
-// count
+// view filter based on latest measurement date
+$viewFilterSql = "";
+if ($view === 'updated') {
+  // this month
+  $viewFilterSql = " AND lm.last_measured >= ? AND lm.last_measured < ? ";
+  $params[] = $firstDay;
+  $params[] = $nextMonthFirstDay;
+} elseif ($view === 'outdated') {
+  // no measurement or older than this month
+  $viewFilterSql = " AND (lm.last_measured IS NULL OR lm.last_measured < ?) ";
+  $params[] = $firstDay;
+}
+
+// total
 $countSql = "
   SELECT COUNT(*)
   FROM tbl_child_info ci
@@ -173,19 +169,22 @@ $countSql = "
     GROUP BY child_seq
   ) lm ON lm.child_seq = ci.child_seq
   $whereSql
-  $viewWhere
+  $viewFilterSql
 ";
 $st = $pdo->prepare($countSql);
 $st->execute($params);
 $total = (int)$st->fetchColumn();
 
-// list
+// rows
 $listSql = "
   SELECT
-    ci.child_seq AS id,
-    CONCAT_WS(' ', ci.c_firstname, ci.c_middlename, ci.c_lastname) AS full_name,
-    CONCAT_WS(', ', NULLIF(ci.purok,''), b.barangay_name) AS address,
+    ci.child_seq,
+    ci.c_firstname,
+    ci.c_middlename,
+    ci.c_lastname,
     ci.sex,
+    ci.purok,
+    b.barangay_name,
     lm.last_measured AS last_updated
   FROM tbl_child_info ci
   LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
@@ -195,7 +194,7 @@ $listSql = "
     GROUP BY child_seq
   ) lm ON lm.child_seq = ci.child_seq
   $whereSql
-  $viewWhere
+  $viewFilterSql
   ORDER BY COALESCE(lm.last_measured, '1900-01-01') DESC, ci.child_seq DESC
   LIMIT $limit OFFSET $offset
 ";
@@ -206,6 +205,7 @@ $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 echo json_encode([
   "ok" => true,
+  "message" => "OK",
   "view" => $view,
   "page" => $page,
   "limit" => $limit,
