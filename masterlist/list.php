@@ -21,158 +21,130 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
 }
 
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Methods: GET, OPTIONS");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
 
 if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
   http_response_code(200);
   exit;
 }
 
+if (($_SERVER["REQUEST_METHOD"] ?? "") !== "POST") {
+  http_response_code(405);
+  echo json_encode(["ok" => false, "message" => "Method not allowed"]);
+  exit;
+}
+
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
+
+function out($code, $payload) {
+  http_response_code($code);
+  echo json_encode($payload);
+  exit;
+}
 
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
   $userId = (int)($authUser->sub ?? 0);
 
-  $view = strtolower(trim($_GET['view'] ?? 'all'));
-  $allowedViews = ['all', 'updated', 'outdated', 'archive'];
-  if (!in_array($view, $allowedViews, true)) $view = 'all';
+  $raw = file_get_contents("php://input");
+  $data = json_decode($raw, true);
+  if (!is_array($data)) $data = [];
 
-  // If not admin => restrict by their barangay_id
-  $userBarangayId = 0;
-  if ($role !== 'admin') {
-    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+  $c_lastname  = trim((string)($data['c_lastname'] ?? ''));
+  $c_firstname = trim((string)($data['c_firstname'] ?? ''));
+  $c_middlename = trim((string)($data['c_middlename'] ?? ''));
+
+  $sex = trim((string)($data['sex'] ?? ''));
+  $purok = trim((string)($data['purok'] ?? ''));
+
+  // Optional fields (if you want later)
+  $date_birth = trim((string)($data['date_birth'] ?? ''));
+  $disability = trim((string)($data['disability'] ?? ''));
+
+  if ($c_lastname === '' || $c_firstname === '') {
+    out(422, ["ok" => false, "message" => "Child first name and last name are required"]);
+  }
+
+  // normalize sex
+  $sexLower = strtolower($sex);
+  if (in_array($sexLower, ['m', 'male', 'boy', 'boys'], true)) $sex = 'Male';
+  if (in_array($sexLower, ['f', 'female', 'girl', 'girls'], true)) $sex = 'Female';
+
+  if (!in_array($sex, ['Male', 'Female'], true)) {
+    out(422, ["ok" => false, "message" => "Sex must be Male or Female"]);
+  }
+
+  // Resolve barangay scope:
+  // - Admin: must send barangay_id
+  // - user/bns: force to their barangay_id (ignore client input)
+  $barangay_id = 0;
+  $province_id = null;
+  $city_id = null;
+
+  if ($role === 'admin') {
+    $barangay_id = (int)($data['barangay_id'] ?? 0);
+    if ($barangay_id <= 0) {
+      out(422, ["ok" => false, "message" => "Admin must provide barangay_id"]);
+    }
+
+    // If you have province_id/city_id in POST, accept them
+    if (isset($data['province_id'])) $province_id = (int)$data['province_id'];
+    if (isset($data['city_id'])) $city_id = (int)$data['city_id'];
+  } else {
+    $st = $pdo->prepare("SELECT province_id, city_id, barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
     $st->execute([$userId]);
-    $userBarangayId = (int)($st->fetchColumn() ?: 0);
+    $u = $st->fetch(PDO::FETCH_ASSOC);
 
-    if ($userBarangayId <= 0) {
-      http_response_code(403);
-      echo json_encode(["ok" => false, "message" => "No barangay assigned"]);
-      exit;
-    }
-  }
-
-  // Latest measurement per child (date + tie-breaker)
-  $latestJoin = "
-    LEFT JOIN (
-      SELECT m1.child_seq, m1.date_measured
-      FROM tbl_measurement m1
-      JOIN (
-        SELECT child_seq, MAX(date_measured) AS max_date
-        FROM tbl_measurement
-        GROUP BY child_seq
-      ) md
-        ON md.child_seq = m1.child_seq AND md.max_date = m1.date_measured
-      JOIN (
-        SELECT child_seq, date_measured, MAX(measure_id) AS max_measure_id
-        FROM tbl_measurement
-        GROUP BY child_seq, date_measured
-      ) mi
-        ON mi.child_seq = m1.child_seq
-       AND mi.date_measured = m1.date_measured
-       AND mi.max_measure_id = m1.measure_id
-    ) lm ON lm.child_seq = ci.child_seq
-  ";
-
-  // --------------------
-  // ARCHIVE VIEW
-  // --------------------
-  if ($view === 'archive') {
-    $where = [];
-    $params = [];
-
-    if ($role !== 'admin') {
-      $where[] = "ca.barangay_id = ?";
-      $params[] = $userBarangayId;
+    $barangay_id = (int)($u['barangay_id'] ?? 0);
+    if ($barangay_id <= 0) {
+      out(403, ["ok" => false, "message" => "No barangay assigned"]);
     }
 
-    $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
-
-    // Note: tbl_child_archive columns based on your ERD
-    $sql = "
-      SELECT
-        ca.child_seq,
-        ca.archived_id,
-        ca.c_firstname,
-        ca.c_middlename,
-        ca.c_lastname,
-        ca.sex,
-        ca.purok,
-        b.barangay_name,
-        NULL AS last_updated
-      FROM tbl_child_archive ca
-      LEFT JOIN tbl_barangay b ON b.barangay_id = ca.barangay_id
-      $whereSql
-      ORDER BY ca.c_lastname ASC, ca.c_firstname ASC
-    ";
-
-    $st = $pdo->prepare($sql);
-    $st->execute($params);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode(["ok" => true, "rows" => $rows]);
-    exit;
+    // Try to carry these if your tbl_child_info requires them
+    $province_id = isset($u['province_id']) ? (int)$u['province_id'] : null;
+    $city_id = isset($u['city_id']) ? (int)$u['city_id'] : null;
   }
 
-  // --------------------
-  // ACTIVE CHILDREN (tbl_child_info)
-  // all / updated / outdated
-  // --------------------
-  $where = [];
-  $params = [];
-
-  if ($role !== 'admin') {
-    $where[] = "ci.barangay_id = ?";
-    $params[] = $userBarangayId;
-  }
-
-  // Updated this month: last_updated in current month/year
-  if ($view === 'updated') {
-    $where[] = "lm.date_measured IS NOT NULL";
-    $where[] = "YEAR(lm.date_measured) = YEAR(CURDATE())";
-    $where[] = "MONTH(lm.date_measured) = MONTH(CURDATE())";
-  }
-
-  // Outdated this month: not measured this month (including never measured)
-  if ($view === 'outdated') {
-    $where[] = "(
-      lm.date_measured IS NULL
-      OR YEAR(lm.date_measured) <> YEAR(CURDATE())
-      OR MONTH(lm.date_measured) <> MONTH(CURDATE())
-    )";
-  }
-
-  $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
-
+  // Insert into tbl_child_info
+  // NOTE: If your tbl_child_info has more NOT NULL columns, add them here.
   $sql = "
-    SELECT
-      ci.child_seq,
-      ci.c_firstname,
-      ci.c_middlename,
-      ci.c_lastname,
-      ci.sex,
-      ci.purok,
-      b.barangay_name,
-      lm.date_measured AS last_updated
-    FROM tbl_child_info ci
-    LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
-    $latestJoin
-    $whereSql
-    ORDER BY ci.c_lastname ASC, ci.c_firstname ASC
+    INSERT INTO tbl_child_info
+      (province_id, city_id, barangay_id, purok,
+       c_lastname, c_firstname, c_middlename,
+       sex, date_birth, disability,
+       user_id)
+    VALUES
+      (:province_id, :city_id, :barangay_id, :purok,
+       :c_lastname, :c_firstname, :c_middlename,
+       :sex, :date_birth, :disability,
+       :user_id)
   ";
 
   $st = $pdo->prepare($sql);
-  $st->execute($params);
-  $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+  $st->execute([
+    ':province_id' => $province_id,
+    ':city_id' => $city_id,
+    ':barangay_id' => $barangay_id,
+    ':purok' => $purok ?: null,
 
-  echo json_encode(["ok" => true, "rows" => $rows]);
-} catch (Throwable $e) {
-  http_response_code(500);
-  echo json_encode([
-    "ok" => false,
-    "message" => "Server error",
-    "error" => $e->getMessage()
+    ':c_lastname' => $c_lastname,
+    ':c_firstname' => $c_firstname,
+    ':c_middlename' => $c_middlename ?: null,
+
+    ':sex' => $sex,
+    ':date_birth' => ($date_birth !== '' ? $date_birth : null),
+    ':disability' => ($disability !== '' ? $disability : null),
+
+    ':user_id' => $userId
   ]);
+
+  out(201, [
+    "ok" => true,
+    "message" => "Child added",
+    "child_seq" => (int)$pdo->lastInsertId()
+  ]);
+} catch (Throwable $e) {
+  out(500, ["ok" => false, "message" => "Server error", "error" => $e->getMessage()]);
 }
