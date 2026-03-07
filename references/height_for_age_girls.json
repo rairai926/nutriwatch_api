@@ -1,0 +1,650 @@
+[
+  {
+    "age_months": 0,
+    "severely_stunted_max": 43.5,
+    "stunted_min": 43.6,
+    "stunted_max": 45.3,
+    "normal_min": 45.4,
+    "normal_max": 52.9,
+    "tall_min": 53.0
+  },
+  {
+    "age_months": 1,
+    "severely_stunted_max": 47.7,
+    "stunted_min": 47.8,
+    "stunted_max": 49.7,
+    "normal_min": 49.8,
+    "normal_max": 57.6,
+    "tall_min": 57.7
+  },
+  {
+    "age_months": 2,
+    "severely_stunted_max": 50.9,
+    "stunted_min": 51.0,
+    "stunted_max": 52.9,
+    "normal_min": 53.0,
+    "normal_max": 61.1,
+    "tall_min": 61.2
+  },
+  {
+    "age_months": 3,
+    "severely_stunted_max": 53.4,
+    "stunted_min": 53.5,
+    "stunted_max": 55.5,
+    "normal_min": 55.6,
+    "normal_max": 64.0,
+    "tall_min": 64.1
+  },
+  {
+    "age_months": 4,
+    "severely_stunted_max": 55.5,
+    "stunted_min": 55.6,
+    "stunted_max": 57.7,
+    "normal_min": 57.8,
+    "normal_max": 66.4,
+    "tall_min": 66.5
+  },
+  {
+    "age_months": 5,
+    "severely_stunted_max": 57.3,
+    "stunted_min": 57.4,
+    "stunted_max": 59.5,
+    "normal_min": 59.6,
+    "normal_max": 68.5,
+    "tall_min": 68.6
+  },
+  {
+    "age_months": 6,
+    "severely_stunted_max": 58.8,
+    "stunted_min": 58.9,
+    "stunted_max": 61.1,
+    "normal_min": 61.2,
+    "normal_max": 70.3,
+    "tall_min": 70.4
+  },
+  {
+    "age_months": 7,
+    "severely_stunted_max": 60.2,
+    "stunted_min": 60.3,
+    "stunted_max": 62.6,
+    "normal_min": 62.7,
+    "normal_max": 71.9,
+    "tall_min": 72.0
+  },
+  {
+    "age_months": 8,
+    "severely_stunted_max": 61.6,
+    "stunted_min": 61.7,
+    "stunted_max": 63.9,
+    "normal_min": 64.0,
+    "normal_max": 73.5,
+    "tall_min": 73.6
+  },
+  {
+    "age_months": 9,
+    "severely_stunted_max": 62.8,
+    "stunted_min": 62.9,
+    "stunted_max": 65.2,
+    "normal_min": 65.3,
+    "normal_max": 75.0,
+    "tall_min": 75.1
+  },
+  {
+    "age_months": 10,
+    "severely_stunted_max": 64.0,
+    "stunted_min": 64.1,
+    "stunted_max": 66.4,
+    "normal_min": 66.5,
+    "normal_max": 76.4,
+    "tall_min": 76.5
+  },
+  {
+    "age_months": 11,
+    "severely_stunted_max": 65.1,
+    "stunted_min": 65.2,
+    "stunted_max": 67.6,
+    "normal_min": 67.7,
+    "normal_max": 77.8,
+    "tall_min": 77.9
+  },
+  {
+    "age_months": 12,
+    "severely_stunted_max": 66.2,
+    "stunted_min": 66.3,
+    "stunted_max": 68.8,
+    "normal_min": 68.9,
+    "normal_max": 79.2,
+    "tall_min": 79.3
+  },
+  {
+    "age_months": 13,
+    "severely_stunted_max": 67.2,
+    "stunted_min": 67.3,
+    "stunted_max": 69.9,
+    "normal_min": 70.0,
+    "normal_max": 80.5,
+    "tall_min": 80.6
+  },
+  {
+    "age_months": 14,
+    "severely_stunted_max": 68.2,
+    "stunted_min": 68.3,
+    "stunted_max": 70.9,
+    "normal_min": 71.0,
+    "normal_max": 81.7,
+    "tall_min": 81.8
+  },
+  {
+    "age_months": 15,
+    "severely_stunted_max": 69.2,
+    "stunted_min": 69.3,
+    "stunted_max": 71.9,
+    "normal_min": 72.0,
+    "normal_max": 83.0,
+    "tall_min": 83.1
+  },
+  {
+    "age_months": 16,
+    "severely_stunted_max": 70.1,
+    "stunted_min": 70.2,
+    "stunted_max": 72.9,
+    "normal_min": 73.0,
+    "normal_max": 84.2,
+    "tall_min": 84.3
+  },
+  {
+    "age_months": 17,
+    "severely_stunted_max": 71.0,
+    "stunted_min": 71.1,
+    "stunted_max": 73.9,
+    "normal_min": 74.0,
+    "normal_max": 85.4,
+    "tall_min": 85.5
+  },
+  {
+    "age_months": 18,
+    "severely_stunted_max": 71.9,
+    "stunted_min": 72.0,
+    "stunted_max": 74.8,
+    "normal_min": 74.9,
+    "normal_max": 86.5,
+    "tall_min": 86.6
+  },
+  {
+    "age_months": 19,
+    "severely_stunted_max": 72.7,
+    "stunted_min": 72.8,
+    "stunted_max": 75.7,
+    "normal_min": 75.8,
+    "normal_max": 87.6,
+    "tall_min": 87.7
+  },
+  {
+    "age_months": 20,
+    "severely_stunted_max": 73.6,
+    "stunted_min": 73.7,
+    "stunted_max": 76.6,
+    "normal_min": 76.7,
+    "normal_max": 88.7,
+    "tall_min": 88.8
+  },
+  {
+    "age_months": 21,
+    "severely_stunted_max": 74.4,
+    "stunted_min": 74.5,
+    "stunted_max": 77.4,
+    "normal_min": 77.5,
+    "normal_max": 89.8,
+    "tall_min": 89.9
+  },
+  {
+    "age_months": 22,
+    "severely_stunted_max": 75.1,
+    "stunted_min": 75.2,
+    "stunted_max": 78.3,
+    "normal_min": 78.4,
+    "normal_max": 90.8,
+    "tall_min": 90.9
+  },
+  {
+    "age_months": 23,
+    "severely_stunted_max": 75.9,
+    "stunted_min": 76.0,
+    "stunted_max": 79.1,
+    "normal_min": 79.2,
+    "normal_max": 91.9,
+    "tall_min": 92.0
+  },
+  {
+    "age_months": 24,
+    "severely_stunted_max": 75.9,
+    "stunted_min": 76.0,
+    "stunted_max": 79.2,
+    "normal_min": 79.3,
+    "normal_max": 92.2,
+    "tall_min": 92.3
+  },
+  {
+    "age_months": 25,
+    "severely_stunted_max": 76.7,
+    "stunted_min": 76.8,
+    "stunted_max": 79.9,
+    "normal_min": 80.0,
+    "normal_max": 93.1,
+    "tall_min": 93.2
+  },
+  {
+    "age_months": 26,
+    "severely_stunted_max": 77.4,
+    "stunted_min": 77.5,
+    "stunted_max": 80.7,
+    "normal_min": 80.8,
+    "normal_max": 94.1,
+    "tall_min": 94.2
+  },
+  {
+    "age_months": 27,
+    "severely_stunted_max": 78.0,
+    "stunted_min": 78.1,
+    "stunted_max": 81.4,
+    "normal_min": 81.5,
+    "normal_max": 95.0,
+    "tall_min": 95.1
+  },
+  {
+    "age_months": 28,
+    "severely_stunted_max": 78.7,
+    "stunted_min": 78.8,
+    "stunted_max": 82.1,
+    "normal_min": 82.2,
+    "normal_max": 96.0,
+    "tall_min": 96.1
+  },
+  {
+    "age_months": 29,
+    "severely_stunted_max": 79.4,
+    "stunted_min": 79.5,
+    "stunted_max": 82.8,
+    "normal_min": 82.9,
+    "normal_max": 96.9,
+    "tall_min": 97.0
+  },
+  {
+    "age_months": 30,
+    "severely_stunted_max": 80.0,
+    "stunted_min": 80.1,
+    "stunted_max": 83.5,
+    "normal_min": 83.6,
+    "normal_max": 97.7,
+    "tall_min": 97.8
+  },
+  {
+    "age_months": 31,
+    "severely_stunted_max": 80.6,
+    "stunted_min": 80.7,
+    "stunted_max": 84.2,
+    "normal_min": 84.3,
+    "normal_max": 98.6,
+    "tall_min": 98.7
+  },
+  {
+    "age_months": 32,
+    "severely_stunted_max": 81.2,
+    "stunted_min": 81.3,
+    "stunted_max": 84.8,
+    "normal_min": 84.9,
+    "normal_max": 99.4,
+    "tall_min": 99.5
+  },
+  {
+    "age_months": 33,
+    "severely_stunted_max": 81.8,
+    "stunted_min": 81.9,
+    "stunted_max": 85.5,
+    "normal_min": 85.6,
+    "normal_max": 100.3,
+    "tall_min": 100.4
+  },
+  {
+    "age_months": 34,
+    "severely_stunted_max": 82.4,
+    "stunted_min": 82.5,
+    "stunted_max": 86.1,
+    "normal_min": 86.2,
+    "normal_max": 101.1,
+    "tall_min": 101.2
+  },
+  {
+    "age_months": 35,
+    "severely_stunted_max": 83.0,
+    "stunted_min": 83.1,
+    "stunted_max": 86.7,
+    "normal_min": 86.8,
+    "normal_max": 101.9,
+    "tall_min": 102.0
+  },
+  {
+    "age_months": 36,
+    "severely_stunted_max": 83.5,
+    "stunted_min": 83.6,
+    "stunted_max": 87.3,
+    "normal_min": 87.4,
+    "normal_max": 102.7,
+    "tall_min": 102.8
+  },
+  {
+    "age_months": 37,
+    "severely_stunted_max": 84.1,
+    "stunted_min": 84.2,
+    "stunted_max": 87.9,
+    "normal_min": 88.0,
+    "normal_max": 103.4,
+    "tall_min": 103.5
+  },
+  {
+    "age_months": 38,
+    "severely_stunted_max": 84.6,
+    "stunted_min": 84.7,
+    "stunted_max": 88.5,
+    "normal_min": 88.6,
+    "normal_max": 104.2,
+    "tall_min": 104.3
+  },
+  {
+    "age_months": 39,
+    "severely_stunted_max": 85.2,
+    "stunted_min": 85.3,
+    "stunted_max": 89.1,
+    "normal_min": 89.2,
+    "normal_max": 105.0,
+    "tall_min": 105.1
+  },
+  {
+    "age_months": 40,
+    "severely_stunted_max": 85.7,
+    "stunted_min": 85.8,
+    "stunted_max": 89.7,
+    "normal_min": 89.8,
+    "normal_max": 105.7,
+    "tall_min": 105.8
+  },
+  {
+    "age_months": 41,
+    "severely_stunted_max": 86.2,
+    "stunted_min": 86.3,
+    "stunted_max": 90.3,
+    "normal_min": 90.4,
+    "normal_max": 106.4,
+    "tall_min": 106.5
+  },
+  {
+    "age_months": 42,
+    "severely_stunted_max": 86.7,
+    "stunted_min": 86.8,
+    "stunted_max": 90.8,
+    "normal_min": 90.9,
+    "normal_max": 107.2,
+    "tall_min": 107.3
+  },
+  {
+    "age_months": 43,
+    "severely_stunted_max": 87.3,
+    "stunted_min": 87.4,
+    "stunted_max": 91.4,
+    "normal_min": 91.5,
+    "normal_max": 107.9,
+    "tall_min": 108.0
+  },
+  {
+    "age_months": 44,
+    "severely_stunted_max": 87.8,
+    "stunted_min": 87.9,
+    "stunted_max": 91.9,
+    "normal_min": 92.0,
+    "normal_max": 108.6,
+    "tall_min": 108.7
+  },
+  {
+    "age_months": 45,
+    "severely_stunted_max": 88.3,
+    "stunted_min": 88.4,
+    "stunted_max": 92.4,
+    "normal_min": 92.5,
+    "normal_max": 109.3,
+    "tall_min": 109.4
+  },
+  {
+    "age_months": 46,
+    "severely_stunted_max": 88.8,
+    "stunted_min": 88.9,
+    "stunted_max": 93.0,
+    "normal_min": 93.1,
+    "normal_max": 110.0,
+    "tall_min": 110.1
+  },
+  {
+    "age_months": 47,
+    "severely_stunted_max": 89.2,
+    "stunted_min": 89.3,
+    "stunted_max": 93.5,
+    "normal_min": 93.6,
+    "normal_max": 110.7,
+    "tall_min": 110.8
+  },
+  {
+    "age_months": 48,
+    "severely_stunted_max": 89.7,
+    "stunted_min": 89.8,
+    "stunted_max": 94.0,
+    "normal_min": 94.1,
+    "normal_max": 111.3,
+    "tall_min": 111.4
+  },
+  {
+    "age_months": 49,
+    "severely_stunted_max": 90.2,
+    "stunted_min": 90.3,
+    "stunted_max": 94.5,
+    "normal_min": 94.6,
+    "normal_max": 112.0,
+    "tall_min": 112.1
+  },
+  {
+    "age_months": 50,
+    "severely_stunted_max": 90.6,
+    "stunted_min": 90.7,
+    "stunted_max": 95.0,
+    "normal_min": 95.1,
+    "normal_max": 112.7,
+    "tall_min": 112.8
+  },
+  {
+    "age_months": 51,
+    "severely_stunted_max": 91.1,
+    "stunted_min": 91.2,
+    "stunted_max": 95.5,
+    "normal_min": 95.6,
+    "normal_max": 113.3,
+    "tall_min": 113.4
+  },
+  {
+    "age_months": 52,
+    "severely_stunted_max": 91.6,
+    "stunted_min": 91.7,
+    "stunted_max": 96.0,
+    "normal_min": 96.1,
+    "normal_max": 114.0,
+    "tall_min": 114.1
+  },
+  {
+    "age_months": 53,
+    "severely_stunted_max": 92.0,
+    "stunted_min": 92.1,
+    "stunted_max": 96.5,
+    "normal_min": 96.6,
+    "normal_max": 114.6,
+    "tall_min": 114.7
+  },
+  {
+    "age_months": 54,
+    "severely_stunted_max": 92.5,
+    "stunted_min": 92.6,
+    "stunted_max": 97.0,
+    "normal_min": 97.1,
+    "normal_max": 115.2,
+    "tall_min": 115.3
+  },
+  {
+    "age_months": 55,
+    "severely_stunted_max": 92.9,
+    "stunted_min": 93.0,
+    "stunted_max": 97.5,
+    "normal_min": 97.6,
+    "normal_max": 115.9,
+    "tall_min": 116.0
+  },
+  {
+    "age_months": 56,
+    "severely_stunted_max": 93.3,
+    "stunted_min": 93.4,
+    "stunted_max": 98.0,
+    "normal_min": 98.1,
+    "normal_max": 116.5,
+    "tall_min": 116.6
+  },
+  {
+    "age_months": 57,
+    "severely_stunted_max": 93.8,
+    "stunted_min": 93.9,
+    "stunted_max": 98.4,
+    "normal_min": 98.5,
+    "normal_max": 117.1,
+    "tall_min": 117.2
+  },
+  {
+    "age_months": 58,
+    "severely_stunted_max": 94.2,
+    "stunted_min": 94.3,
+    "stunted_max": 98.9,
+    "normal_min": 99.0,
+    "normal_max": 117.7,
+    "tall_min": 117.8
+  },
+  {
+    "age_months": 59,
+    "severely_stunted_max": 94.6,
+    "stunted_min": 94.7,
+    "stunted_max": 99.4,
+    "normal_min": 99.5,
+    "normal_max": 118.3,
+    "tall_min": 118.4
+  },
+  {
+    "age_months": 60,
+    "severely_stunted_max": 95.1,
+    "stunted_min": 95.2,
+    "stunted_max": 99.8,
+    "normal_min": 99.9,
+    "normal_max": 118.9,
+    "tall_min": 119.0
+  },
+  {
+    "age_months": 61,
+    "severely_stunted_max": 95.2,
+    "stunted_min": 95.3,
+    "stunted_max": 100.0,
+    "normal_min": 100.1,
+    "normal_max": 119.1,
+    "tall_min": 119.2
+  },
+  {
+    "age_months": 62,
+    "severely_stunted_max": 95.6,
+    "stunted_min": 95.7,
+    "stunted_max": 100.4,
+    "normal_min": 100.5,
+    "normal_max": 119.7,
+    "tall_min": 119.8
+  },
+  {
+    "age_months": 63,
+    "severely_stunted_max": 96.0,
+    "stunted_min": 96.1,
+    "stunted_max": 100.9,
+    "normal_min": 101.0,
+    "normal_max": 120.3,
+    "tall_min": 120.4
+  },
+  {
+    "age_months": 64,
+    "severely_stunted_max": 96.4,
+    "stunted_min": 96.5,
+    "stunted_max": 101.3,
+    "normal_min": 101.4,
+    "normal_max": 120.9,
+    "tall_min": 121.0
+  },
+  {
+    "age_months": 65,
+    "severely_stunted_max": 96.9,
+    "stunted_min": 97.0,
+    "stunted_max": 101.8,
+    "normal_min": 101.9,
+    "normal_max": 121.5,
+    "tall_min": 121.6
+  },
+  {
+    "age_months": 66,
+    "severely_stunted_max": 97.3,
+    "stunted_min": 97.4,
+    "stunted_max": 102.2,
+    "normal_min": 102.3,
+    "normal_max": 122.0,
+    "tall_min": 122.1
+  },
+  {
+    "age_months": 67,
+    "severely_stunted_max": 97.7,
+    "stunted_min": 97.8,
+    "stunted_max": 102.6,
+    "normal_min": 102.7,
+    "normal_max": 122.6,
+    "tall_min": 122.7
+  },
+  {
+    "age_months": 68,
+    "severely_stunted_max": 98.1,
+    "stunted_min": 98.2,
+    "stunted_max": 103.1,
+    "normal_min": 103.2,
+    "normal_max": 123.2,
+    "tall_min": 123.3
+  },
+  {
+    "age_months": 69,
+    "severely_stunted_max": 98.5,
+    "stunted_min": 98.6,
+    "stunted_max": 103.5,
+    "normal_min": 103.6,
+    "normal_max": 123.7,
+    "tall_min": 123.8
+  },
+  {
+    "age_months": 70,
+    "severely_stunted_max": 98.9,
+    "stunted_min": 99.0,
+    "stunted_max": 103.9,
+    "normal_min": 104.0,
+    "normal_max": 124.3,
+    "tall_min": 124.4
+  },
+  {
+    "age_months": 71,
+    "severely_stunted_max": 99.3,
+    "stunted_min": 99.4,
+    "stunted_max": 104.4,
+    "normal_min": 104.5,
+    "normal_max": 124.8,
+    "tall_min": 124.9
+  }
+]
