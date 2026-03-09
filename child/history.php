@@ -54,6 +54,7 @@ try {
     $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
     $st->execute([$userId]);
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
+
     if ($userBarangayId <= 0) {
       out(403, ["message" => "No barangay assigned"]);
     }
@@ -89,8 +90,19 @@ try {
       m.lt_status,
       m.muac_status,
       m.bilateral_pitting,
-      m.user_id
+      m.user_id AS encoded_by,
+
+      u.users_id,
+      u.role AS encoded_by_role,
+      CONCAT(
+        COALESCE(u.firstname, ''),
+        CASE WHEN COALESCE(u.middlename, '') <> '' THEN CONCAT(' ', u.middlename) ELSE '' END,
+        CASE WHEN COALESCE(u.lastname, '') <> '' THEN CONCAT(' ', u.lastname) ELSE '' END
+      ) AS encoded_by_name
+
     FROM tbl_measurement m
+    LEFT JOIN tbl_users u
+      ON u.users_id = m.user_id
     WHERE m.child_seq = ?
     ORDER BY m.date_measured DESC, m.measure_id DESC
   ";
@@ -98,6 +110,14 @@ try {
   $st = $pdo->prepare($sql);
   $st->execute([$childSeq]);
   $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+  foreach ($rows as &$row) {
+    $row['encoded_by_name'] = trim((string)($row['encoded_by_name'] ?? ''));
+    if ($row['encoded_by_name'] === '') {
+      $row['encoded_by_name'] = 'Unknown User';
+    }
+  }
+  unset($row);
 
   out(200, ["rows" => $rows]);
 } catch (Throwable $e) {
