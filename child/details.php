@@ -16,6 +16,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
   header("Access-Control-Allow-Origin: $origin");
   header("Access-Control-Allow-Credentials: true");
 }
+
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 
@@ -51,9 +52,10 @@ try {
 
   $userBarangayId = 0;
   if ($role !== 'admin') {
-    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
     $st->execute([$userId]);
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
+
     if ($userBarangayId <= 0) {
       out(403, ["message" => "No barangay assigned"]);
     }
@@ -107,6 +109,7 @@ try {
     SELECT
       m.measure_id,
       m.child_seq,
+      m.user_id,
       m.date_measured,
       m.weight,
       m.height,
@@ -116,24 +119,29 @@ try {
       m.height_status,
       m.lt_status,
       m.muac_status,
-      m.bilateral_pitting,
-      m.user_id
+      m.bilateral_pitting
     FROM tbl_measurement m
     WHERE m.child_seq = ?
     ORDER BY m.date_measured DESC, m.measure_id DESC
     LIMIT 1
   ";
+
   $st = $pdo->prepare($latestSql);
   $st->execute([$childSeq]);
   $latest = $st->fetch(PDO::FETCH_ASSOC);
 
-  if ($latest && !empty($child['date_birth']) && !empty($latest['date_measured'])) {
-    $birth = new DateTime($child['date_birth']);
-    $measured = new DateTime($latest['date_measured']);
-    $diff = $birth->diff($measured);
-    $latest['age_days'] = (int)$diff->days;
+  // if no measurement yet, return null instead of false
+  if (!$latest) {
+    $latest = null;
   } else {
-    $latest['age_days'] = null;
+    if (!empty($child['date_birth']) && !empty($latest['date_measured'])) {
+      $birth = new DateTime($child['date_birth']);
+      $measured = new DateTime($latest['date_measured']);
+      $diff = $birth->diff($measured);
+      $latest['age_days'] = (int)$diff->days;
+    } else {
+      $latest['age_days'] = null;
+    }
   }
 
   out(200, [
