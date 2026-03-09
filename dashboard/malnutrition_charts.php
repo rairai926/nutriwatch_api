@@ -50,6 +50,18 @@ try {
   $role = strtolower($authUser->role ?? 'user');
   $userId = (int)($authUser->sub ?? 0);
 
+  $month = (int)($_GET['month'] ?? date('n'));
+  $year = (int)($_GET['year'] ?? date('Y'));
+  $requestedBarangayId = (int)($_GET['barangay_id'] ?? 0);
+
+  if ($month < 1 || $month > 12) {
+    out(422, ["message" => "Invalid month"]);
+  }
+
+  if ($year < 2000 || $year > 2100) {
+    out(422, ["message" => "Invalid year"]);
+  }
+
   $barangayId = 0;
   if ($role !== 'admin') {
     $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
@@ -59,13 +71,14 @@ try {
     if ($barangayId <= 0) {
       out(403, ["message" => "No barangay assigned"]);
     }
+  } else {
+    $barangayId = $requestedBarangayId > 0 ? $requestedBarangayId : 0;
   }
 
-  // latest measurement per child
   $whereBarangay = "";
-  $params = [];
+  $params = [$month, $year, $month, $year];
 
-  if ($role !== 'admin') {
+  if ($barangayId > 0) {
     $whereBarangay = " AND ci.barangay_id = ? ";
     $params[] = $barangayId;
   }
@@ -83,6 +96,7 @@ try {
     INNER JOIN (
       SELECT child_seq, MAX(date_measured) AS max_date
       FROM tbl_measurement
+      WHERE MONTH(date_measured) = ? AND YEAR(date_measured) = ?
       GROUP BY child_seq
     ) lm
       ON lm.child_seq = x.child_seq
@@ -90,6 +104,7 @@ try {
     INNER JOIN (
       SELECT child_seq, date_measured, MAX(measure_id) AS max_measure_id
       FROM tbl_measurement
+      WHERE MONTH(date_measured) = ? AND YEAR(date_measured) = ?
       GROUP BY child_seq, date_measured
     ) lt
       ON lt.child_seq = x.child_seq
@@ -108,7 +123,6 @@ try {
   $total0to59 = 0;
   $total6to59 = 0;
 
-  // counts
   $mw = 0;
   $sw = 0;
   $wasted = 0;
@@ -222,9 +236,23 @@ try {
     }
   }
 
+  $barangays = [];
+  if ($role === 'admin') {
+    $st = $pdo->query("
+      SELECT barangay_id, barangay_name
+      FROM tbl_barangay
+      ORDER BY barangay_name ASC
+    ");
+    $barangays = $st->fetchAll(PDO::FETCH_ASSOC);
+  }
+
   out(200, [
+    "month" => $month,
+    "year" => $year,
+    "barangay_id" => $barangayId,
     "base_0_59" => $total0to59,
     "base_6_59" => $total6to59,
+    "barangays" => $barangays,
 
     "wasted" => [
       pct($mw, $total0to59),
