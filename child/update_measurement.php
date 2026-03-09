@@ -77,7 +77,6 @@ try {
     }
   }
 
-  // get measurement + child ownership
   $sql = "
     SELECT
       m.measure_id,
@@ -148,7 +147,6 @@ try {
   $ltStatus = $statuses['lt_status'];
   $muacStatus = $statuses['muac_status'];
 
-  // prevent duplicate date for same child on another record
   $dup = $pdo->prepare("
     SELECT measure_id
     FROM tbl_measurement
@@ -163,6 +161,7 @@ try {
   $updateSql = "
     UPDATE tbl_measurement
     SET
+      user_id = :user_id,
       date_measured = :date_measured,
       weight = :weight,
       height = :height,
@@ -172,13 +171,13 @@ try {
       height_status = :height_status,
       lt_status = :lt_status,
       muac_status = :muac_status,
-      bilateral_pitting = :bilateral_pitting,
-      user_id = :user_id
+      bilateral_pitting = :bilateral_pitting
     WHERE measure_id = :measure_id
   ";
 
   $st = $pdo->prepare($updateSql);
   $st->execute([
+    ':user_id' => $userId,
     ':date_measured' => $dateMeasured,
     ':weight' => $weight,
     ':height' => $height,
@@ -189,7 +188,6 @@ try {
     ':lt_status' => $ltStatus,
     ':muac_status' => $muacStatus,
     ':bilateral_pitting' => $bilateralPitting,
-    ':user_id' => $userId,
     ':measure_id' => $measureId
   ]);
 
@@ -201,11 +199,12 @@ try {
     "weight_status" => $weightStatus,
     "height_status" => $heightStatus,
     "lt_status" => $ltStatus,
-    "muac_status" => $muacStatus
+    "muac_status" => $muacStatus,
+    "user_id" => $userId
   ]);
 } catch (Throwable $e) {
   out(500, [
     "message" => "Server error",
     "error" => $e->getMessage()
   ]);
-}   
+}

@@ -114,7 +114,6 @@ try {
     }
   }
 
-  // Optional range guards
   $ageMonthsPreview = nh_compute_age_months($child['date_birth'], $dateMeasured);
   if ($height !== null) {
     if ($ageMonthsPreview <= 23) {
@@ -139,14 +138,18 @@ try {
   );
 
   $ageMonths = $statuses['age_months'];
-  $ageDays = $statuses['age_days']; // returned to frontend only
+  $ageDays = $statuses['age_days'];
   $weightStatus = $statuses['weight_status'];
   $heightStatus = $statuses['height_status'];
   $ltStatus = $statuses['lt_status'];
   $muacStatus = $statuses['muac_status'];
 
-  // Prevent duplicate measurement on same child + date if you want monthly-only behavior
-  $dup = $pdo->prepare("SELECT measure_id FROM tbl_measurement WHERE child_seq=? AND date_measured=? LIMIT 1");
+  $dup = $pdo->prepare("
+    SELECT measure_id
+    FROM tbl_measurement
+    WHERE child_seq = ? AND date_measured = ?
+    LIMIT 1
+  ");
   $dup->execute([$childSeq, $dateMeasured]);
   if ($dup->fetchColumn()) {
     out(409, ["message" => "A measurement already exists for this date"]);
@@ -154,18 +157,41 @@ try {
 
   $sql = "
     INSERT INTO tbl_measurement
-      (child_seq, date_measured, weight, height, muac, age_months,
-       weight_status, height_status, lt_status, muac_status,
-       bilateral_pitting, user_id)
+      (
+        child_seq,
+        user_id,
+        date_measured,
+        weight,
+        height,
+        muac,
+        age_months,
+        weight_status,
+        height_status,
+        lt_status,
+        muac_status,
+        bilateral_pitting
+      )
     VALUES
-      (:child_seq, :date_measured, :weight, :height, :muac, :age_months,
-       :weight_status, :height_status, :lt_status, :muac_status,
-       :bilateral_pitting, :user_id)
+      (
+        :child_seq,
+        :user_id,
+        :date_measured,
+        :weight,
+        :height,
+        :muac,
+        :age_months,
+        :weight_status,
+        :height_status,
+        :lt_status,
+        :muac_status,
+        :bilateral_pitting
+      )
   ";
 
   $st = $pdo->prepare($sql);
   $st->execute([
     ':child_seq' => $childSeq,
+    ':user_id' => $userId,
     ':date_measured' => $dateMeasured,
     ':weight' => $weight,
     ':height' => $height,
@@ -175,8 +201,7 @@ try {
     ':height_status' => $heightStatus,
     ':lt_status' => $ltStatus,
     ':muac_status' => $muacStatus,
-    ':bilateral_pitting' => $bilateralPitting,
-    ':user_id' => $userId
+    ':bilateral_pitting' => $bilateralPitting
   ]);
 
   out(201, [
@@ -187,7 +212,8 @@ try {
     "weight_status" => $weightStatus,
     "height_status" => $heightStatus,
     "lt_status" => $ltStatus,
-    "muac_status" => $muacStatus
+    "muac_status" => $muacStatus,
+    "user_id" => $userId
   ]);
 } catch (Throwable $e) {
   out(500, [
