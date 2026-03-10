@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
-$authUser = authenticate(['admin']); // ✅ admin only
+$authUser = authenticate(['admin']);
 
 $lastname   = trim($_POST['lastname'] ?? '');
 $firstname  = trim($_POST['firstname'] ?? '');
@@ -22,38 +22,22 @@ if ($lastname === '' || $firstname === '' || $email === '' || $username === '' |
 
 $hash = password_hash($password, PASSWORD_ARGON2ID);
 
-// photo upload (optional)
-$photoPath = null;
-if (!empty($_FILES['photo']['name'])) {
-  $dir = __DIR__ . '/../uploads/users/';
-  if (!is_dir($dir)) mkdir($dir, 0777, true);
-
-  $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-  $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-  if (!in_array($ext, $allowed, true)) {
-    http_response_code(400);
-    echo json_encode(["message" => "Invalid photo type"]);
-    exit;
-  }
-
-  $filename = 'user_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-  $target = $dir . $filename;
-
-  if (!move_uploaded_file($_FILES['photo']['tmp_name'], $target)) {
-    http_response_code(500);
-    echo json_encode(["message" => "Photo upload failed"]);
-    exit;
-  }
-
-  $photoPath = 'uploads/users/' . $filename;
-}
-
 $stmt = $pdo->prepare("
   INSERT INTO tbl_users
-    (lastname, firstname, middlename, email, username, password, role, barangay_id, status, photo, created_at)
+    (lastname, firstname, middlename, email, username, password, role, barangay_id, status, created_at)
   VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 ");
-$stmt->execute([$lastname, $firstname, $middlename, $email, $username, $hash, $role, $barangayId, $status, $photoPath]);
+$stmt->execute([
+  $lastname,
+  $firstname,
+  $middlename,
+  $email,
+  $username,
+  $hash,
+  $role,
+  $barangayId,
+  $status
+]);
 
 echo json_encode(["message" => "User created successfully"]);

@@ -28,55 +28,25 @@ $username   = trim($_POST['username'] ?? '');
 $status     = trim($_POST['status'] ?? '');
 $barangayId = (int)($_POST['barangay_id'] ?? 0);
 
-// only admin can change role
 $role = $isAdmin ? trim($_POST['role'] ?? '') : null;
 
-// optional password change
 $newPassword = trim($_POST['password'] ?? '');
 $hash = $newPassword !== '' ? password_hash($newPassword, PASSWORD_ARGON2ID) : null;
-
-// optional photo
-$photoPath = null;
-if (!empty($_FILES['photo']['name'])) {
-  $dir = __DIR__ . '/../uploads/users/';
-  if (!is_dir($dir)) mkdir($dir, 0777, true);
-
-  $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-  $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-  if (!in_array($ext, $allowed, true)) {
-    http_response_code(400);
-    echo json_encode(["message" => "Invalid photo type"]);
-    exit;
-  }
-
-  $filename = 'user_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-  $target = $dir . $filename;
-
-  if (!move_uploaded_file($_FILES['photo']['tmp_name'], $target)) {
-    http_response_code(500);
-    echo json_encode(["message" => "Photo upload failed"]);
-    exit;
-  }
-
-  $photoPath = 'uploads/users/' . $filename;
-}
 
 $fields = [];
 $params = [];
 
-// allow empty fields? usually NO — so update only provided fields (recommended)
 if ($lastname !== '')   { $fields[] = "lastname=?";   $params[] = $lastname; }
 if ($firstname !== '')  { $fields[] = "firstname=?";  $params[] = $firstname; }
 if ($middlename !== '') { $fields[] = "middlename=?"; $params[] = $middlename; }
 if ($email !== '')      { $fields[] = "email=?";      $params[] = $email; }
 if ($username !== '')   { $fields[] = "username=?";   $params[] = $username; }
 
-if ($isAdmin && $role !== '')        { $fields[] = "role=?";        $params[] = $role; }
-if ($isAdmin && $barangayId > 0)     { $fields[] = "barangay_id=?"; $params[] = $barangayId; }
-if ($isAdmin && $status !== '')      { $fields[] = "status=?";      $params[] = $status; }
+if ($isAdmin && $role !== '')    { $fields[] = "role=?";        $params[] = $role; }
+if ($isAdmin && $barangayId > 0) { $fields[] = "barangay_id=?"; $params[] = $barangayId; }
+if ($isAdmin && $status !== '')  { $fields[] = "status=?";      $params[] = $status; }
 
-if ($hash)      { $fields[] = "password=?"; $params[] = $hash; }
-if ($photoPath) { $fields[] = "photo=?";    $params[] = $photoPath; }
+if ($hash) { $fields[] = "password=?"; $params[] = $hash; }
 
 if (empty($fields)) {
   http_response_code(400);
