@@ -50,11 +50,15 @@ try {
   $st->execute([$userId]);
   $barangayId = (int)($st->fetchColumn() ?: 0);
 
+  $currentMonth = (int)date('n');
+  $currentYear = (int)date('Y');
+  $coverageThreshold = 80;
+
   $items = [];
 
-  // -----------------------------
-  // Announcements
-  // -----------------------------
+  // ---------------------------------------------------
+  // 1) ANNOUNCEMENTS
+  // ---------------------------------------------------
   if ($role === 'admin') {
     $sql = "
       SELECT
@@ -77,9 +81,7 @@ try {
       LIMIT 5
     ";
     $st = $pdo->prepare($sql);
-    $st->execute([
-      ':users_id' => $userId
-    ]);
+    $st->execute([':users_id' => $userId]);
     $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
   } else {
     $sql = "
@@ -114,9 +116,9 @@ try {
     $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
   }
 
-  // -----------------------------
-  // Admin-only: recent child
-  // -----------------------------
+  // ---------------------------------------------------
+  // 2) ADMIN: RECENT CHILD
+  // ---------------------------------------------------
   if ($role === 'admin') {
     $sqlChild = "
       SELECT
@@ -138,14 +140,14 @@ try {
       LIMIT 5
     ";
     $st = $pdo->prepare($sqlChild);
-    $st->execute([
-      ':users_id' => $userId
-    ]);
+    $st->execute([':users_id' => $userId]);
     $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  }
 
-    // -----------------------------
-    // Admin-only: recent measurement
-    // -----------------------------
+  // ---------------------------------------------------
+  // 3) ADMIN: RECENT MEASUREMENT
+  // ---------------------------------------------------
+  if ($role === 'admin') {
     $sqlMeasure = "
       SELECT
         'measurement' AS notif_type,
@@ -166,10 +168,270 @@ try {
       LIMIT 5
     ";
     $st = $pdo->prepare($sqlMeasure);
+    $st->execute([':users_id' => $userId]);
+    $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // ---------------------------------------------------
+  // 4) NEW MALNUTRITION DETECTED
+  // latest measurements this month with non-normal status
+  // ---------------------------------------------------
+  if ($role === 'admin') {
+    $sqlMal = "
+      SELECT
+        'malnutrition' AS notif_type,
+        m.measure_id AS notif_ref_id,
+        CONCAT('New malnutrition detected: ', ci.c_firstname, ' ', ci.c_lastname) AS title,
+        CONCAT(
+          'WFA: ', COALESCE(m.weight_status, '-'),
+          ' | HFA: ', COALESCE(m.height_status, '-'),
+          ' | LT/HT: ', COALESCE(m.lt_status, '-'),
+          ' | MUAC: ', COALESCE(m.muac_status, '-')
+        ) AS description,
+        CONCAT(m.date_measured, ' 00:00:00') AS created_at,
+        'malnutrition' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read
+      FROM tbl_measurement m
+      JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'malnutrition'
+       AND nr.notif_ref_id = m.measure_id
+      WHERE MONTH(m.date_measured) = :month
+        AND YEAR(m.date_measured) = :year
+        AND (
+          LOWER(COALESCE(m.weight_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.height_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.lt_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.muac_status, '')) NOT IN ('', 'normal')
+        )
+      ORDER BY m.measure_id DESC
+      LIMIT 5
+    ";
+    $st = $pdo->prepare($sqlMal);
     $st->execute([
-      ':users_id' => $userId
+      ':users_id' => $userId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
     ]);
     $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  } else {
+    $sqlMal = "
+      SELECT
+        'malnutrition' AS notif_type,
+        m.measure_id AS notif_ref_id,
+        CONCAT('New malnutrition detected: ', ci.c_firstname, ' ', ci.c_lastname) AS title,
+        CONCAT(
+          'WFA: ', COALESCE(m.weight_status, '-'),
+          ' | HFA: ', COALESCE(m.height_status, '-'),
+          ' | LT/HT: ', COALESCE(m.lt_status, '-'),
+          ' | MUAC: ', COALESCE(m.muac_status, '-')
+        ) AS description,
+        CONCAT(m.date_measured, ' 00:00:00') AS created_at,
+        'malnutrition' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read
+      FROM tbl_measurement m
+      JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'malnutrition'
+       AND nr.notif_ref_id = m.measure_id
+      WHERE ci.barangay_id = :barangay_id
+        AND MONTH(m.date_measured) = :month
+        AND YEAR(m.date_measured) = :year
+        AND (
+          LOWER(COALESCE(m.weight_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.height_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.lt_status, '')) NOT IN ('', 'normal')
+          OR LOWER(COALESCE(m.muac_status, '')) NOT IN ('', 'normal')
+        )
+      ORDER BY m.measure_id DESC
+      LIMIT 5
+    ";
+    $st = $pdo->prepare($sqlMal);
+    $st->execute([
+      ':users_id' => $userId,
+      ':barangay_id' => $barangayId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
+    ]);
+    $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // ---------------------------------------------------
+  // 5) MONTHLY WEIGHING REMINDER
+  // children without measurement this month
+  // ---------------------------------------------------
+  if ($role === 'admin') {
+    $sqlReminder = "
+      SELECT
+        'reminder' AS notif_type,
+        ci.child_seq AS notif_ref_id,
+        CONCAT('Monthly weighing reminder: ', ci.c_firstname, ' ', ci.c_lastname) AS title,
+        CONCAT('No measurement yet for ', DATE_FORMAT(CURDATE(), '%M %Y')) AS description,
+        NOW() AS created_at,
+        'reminder' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read
+      FROM tbl_child_info ci
+      LEFT JOIN tbl_measurement m
+        ON m.child_seq = ci.child_seq
+       AND MONTH(m.date_measured) = :month
+       AND YEAR(m.date_measured) = :year
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'reminder'
+       AND nr.notif_ref_id = ci.child_seq
+      WHERE m.measure_id IS NULL
+      ORDER BY ci.child_seq DESC
+      LIMIT 5
+    ";
+    $st = $pdo->prepare($sqlReminder);
+    $st->execute([
+      ':users_id' => $userId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
+    ]);
+    $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  } else {
+    $sqlReminder = "
+      SELECT
+        'reminder' AS notif_type,
+        ci.child_seq AS notif_ref_id,
+        CONCAT('Monthly weighing reminder: ', ci.c_firstname, ' ', ci.c_lastname) AS title,
+        CONCAT('No measurement yet for ', DATE_FORMAT(CURDATE(), '%M %Y')) AS description,
+        NOW() AS created_at,
+        'reminder' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read
+      FROM tbl_child_info ci
+      LEFT JOIN tbl_measurement m
+        ON m.child_seq = ci.child_seq
+       AND MONTH(m.date_measured) = :month
+       AND YEAR(m.date_measured) = :year
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'reminder'
+       AND nr.notif_ref_id = ci.child_seq
+      WHERE ci.barangay_id = :barangay_id
+        AND m.measure_id IS NULL
+      ORDER BY ci.child_seq DESC
+      LIMIT 5
+    ";
+    $st = $pdo->prepare($sqlReminder);
+    $st->execute([
+      ':users_id' => $userId,
+      ':barangay_id' => $barangayId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
+    ]);
+    $items = array_merge($items, $st->fetchAll(PDO::FETCH_ASSOC));
+  }
+
+  // ---------------------------------------------------
+  // 6) BARANGAY COVERAGE ALERT
+  // admin = all barangays below threshold
+  // user/bns = own barangay below threshold
+  // ---------------------------------------------------
+  if ($role === 'admin') {
+    $sqlCoverage = "
+      SELECT
+        'coverage_alert' AS notif_type,
+        b.barangay_id AS notif_ref_id,
+        CONCAT('Coverage alert: ', TRIM(b.barangay_name)) AS title,
+        CONCAT(
+          'Coverage below {$coverageThreshold}% for ',
+          DATE_FORMAT(CURDATE(), '%M %Y')
+        ) AS description,
+        NOW() AS created_at,
+        'coverage_alert' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read,
+        COUNT(DISTINCT ci.child_seq) AS total_children,
+        COUNT(DISTINCT m.child_seq) AS measured_children
+      FROM tbl_barangay b
+      LEFT JOIN tbl_child_info ci
+        ON ci.barangay_id = b.barangay_id
+      LEFT JOIN tbl_measurement m
+        ON m.child_seq = ci.child_seq
+       AND MONTH(m.date_measured) = :month
+       AND YEAR(m.date_measured) = :year
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'coverage_alert'
+       AND nr.notif_ref_id = b.barangay_id
+      GROUP BY b.barangay_id, b.barangay_name, nr.read_id
+      HAVING
+        total_children > 0
+        AND ((measured_children / total_children) * 100) < {$coverageThreshold}
+      ORDER BY ((measured_children / total_children) * 100) ASC
+      LIMIT 5
+    ";
+    $st = $pdo->prepare($sqlCoverage);
+    $st->execute([
+      ':users_id' => $userId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
+    ]);
+    $coverageRows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($coverageRows as &$r) {
+      $pct = ((int)$r['total_children'] > 0)
+        ? round(((int)$r['measured_children'] / (int)$r['total_children']) * 100, 1)
+        : 0;
+      $r['description'] .= " ({$pct}% covered)";
+    }
+    unset($r);
+
+    $items = array_merge($items, $coverageRows);
+  } else {
+    $sqlCoverage = "
+      SELECT
+        'coverage_alert' AS notif_type,
+        b.barangay_id AS notif_ref_id,
+        CONCAT('Coverage alert: ', TRIM(b.barangay_name)) AS title,
+        CONCAT(
+          'Coverage below {$coverageThreshold}% for ',
+          DATE_FORMAT(CURDATE(), '%M %Y')
+        ) AS description,
+        NOW() AS created_at,
+        'coverage_alert' AS icon,
+        CASE WHEN nr.read_id IS NULL THEN 0 ELSE 1 END AS is_read,
+        COUNT(DISTINCT ci.child_seq) AS total_children,
+        COUNT(DISTINCT m.child_seq) AS measured_children
+      FROM tbl_barangay b
+      LEFT JOIN tbl_child_info ci
+        ON ci.barangay_id = b.barangay_id
+      LEFT JOIN tbl_measurement m
+        ON m.child_seq = ci.child_seq
+       AND MONTH(m.date_measured) = :month
+       AND YEAR(m.date_measured) = :year
+      LEFT JOIN tbl_notification_reads nr
+        ON nr.users_id = :users_id
+       AND nr.notif_type = 'coverage_alert'
+       AND nr.notif_ref_id = b.barangay_id
+      WHERE b.barangay_id = :barangay_id
+      GROUP BY b.barangay_id, b.barangay_name, nr.read_id
+      HAVING
+        total_children > 0
+        AND ((measured_children / total_children) * 100) < {$coverageThreshold}
+      LIMIT 1
+    ";
+    $st = $pdo->prepare($sqlCoverage);
+    $st->execute([
+      ':users_id' => $userId,
+      ':barangay_id' => $barangayId,
+      ':month' => $currentMonth,
+      ':year' => $currentYear
+    ]);
+    $coverageRows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($coverageRows as &$r) {
+      $pct = ((int)$r['total_children'] > 0)
+        ? round(((int)$r['measured_children'] / (int)$r['total_children']) * 100, 1)
+        : 0;
+      $r['description'] .= " ({$pct}% covered)";
+    }
+    unset($r);
+
+    $items = array_merge($items, $coverageRows);
   }
 
   usort($items, function ($a, $b) {
