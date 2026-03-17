@@ -16,10 +16,9 @@ try {
         throw new Exception("Method not allowed");
     }
 
-    // Use the same auth style as your existing mobile endpoints
     $user = authenticate();
 
-    if (!$user || empty($user["user_id"])) {
+    if (!$user || empty($user->user_id)) {
         http_response_code(401);
         throw new Exception("Unauthorized");
     }
@@ -68,11 +67,10 @@ try {
         throw new Exception("Child not found");
     }
 
-    // Optional barangay restriction
     if (
-        !empty($user["barangay_id"]) &&
+        !empty($user->barangay_id) &&
         !empty($child["barangay_id"]) &&
-        (int)$user["barangay_id"] !== (int)$child["barangay_id"]
+        (int)$user->barangay_id !== (int)$child["barangay_id"]
     ) {
         http_response_code(403);
         throw new Exception("You are not allowed to access this child");
@@ -104,7 +102,6 @@ try {
     $muacStatus = null;
 
     if ($assessmentMethod === "Weight + Length/Height") {
-        // allow preview even if weight/height not yet complete
         if ($weight !== null && $height !== null) {
             $calc = calculateNutritionStatus(
                 $sex,
@@ -122,7 +119,6 @@ try {
             $muacStatus = $calc["muac_status"] ?? null;
         }
     } elseif ($assessmentMethod === "MUAC") {
-        // allow preview even if muac not yet complete
         if ($muac !== null) {
             $calc = calculateNutritionStatus(
                 $sex,
