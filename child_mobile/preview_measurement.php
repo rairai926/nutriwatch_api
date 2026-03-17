@@ -93,6 +93,7 @@ try {
 
   $where = ["ci.child_seq = ?"];
   $params = [$childSeq];
+
   if ($role !== 'admin') {
     $where[] = "ci.barangay_id = ?";
     $params[] = $userBarangayId;
@@ -142,7 +143,7 @@ try {
 
   if ($assessmentMethod === "Weight + Length/Height") {
     if ($weight !== null && $height !== null) {
-      $calc = calculateNutritionStatus(
+      $calc = nh_compute_all_statuses(
         $sex,
         $dateBirth,
         $dateMeasured,
@@ -159,7 +160,7 @@ try {
     }
   } elseif ($assessmentMethod === "MUAC") {
     if ($muac !== null) {
-      $calc = calculateNutritionStatus(
+      $calc = nh_compute_all_statuses(
         $sex,
         $dateBirth,
         $dateMeasured,
