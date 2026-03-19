@@ -229,7 +229,7 @@ if (!$user) {
 
 // active = allowed
 // inactive = blocked/disabled
-if (($user["status"] ?? "") !== "inactive") {
+if (($user["status"] ?? "") !== "active") {
   http_response_code(403);
   echo json_encode([
     "message" => "Your account has been disabled. Please contact the administrator."
