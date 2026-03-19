@@ -18,6 +18,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
   header("Access-Control-Allow-Origin: $origin");
   header("Access-Control-Allow-Credentials: true");
 }
+
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 
@@ -28,7 +29,10 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
 
 if (($_SERVER["REQUEST_METHOD"] ?? "") !== "POST") {
   http_response_code(405);
-  echo json_encode(["ok" => false, "message" => "Method not allowed"]);
+  echo json_encode([
+    "ok" => false,
+    "message" => "Method not allowed"
+  ]);
   exit;
 }
 
@@ -43,136 +47,153 @@ function out($code, $payload) {
   exit;
 }
 
-function get_user_barangay_id(PDO $pdo, $role, $userId) {
-  if ($role === 'admin') return 0;
-
-  $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
-  $st->execute([(int)$userId]);
-  $barangayId = (int)($st->fetchColumn() ?: 0);
-
-  if ($barangayId <= 0) {
-    out(403, ["ok" => false, "message" => "No barangay assigned"]);
-  }
-
-  return $barangayId;
-}
-
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
-  $role = strtolower((string)($authUser->role ?? 'user'));
-  $userId = (int)($authUser->sub ?? 0);
 
   $raw = file_get_contents("php://input");
   $data = json_decode($raw, true);
 
   if (!is_array($data)) {
-    out(422, ["ok" => false, "message" => "Invalid JSON body"]);
+    out(422, [
+      "ok" => false,
+      "message" => "Invalid JSON body"
+    ]);
   }
 
   $childSeq = (int)($data["child_seq"] ?? 0);
   $dateMeasured = trim((string)($data["date_measured"] ?? ""));
   $assessmentMethod = trim((string)($data["assessment_method"] ?? "Weight + Length/Height"));
+
   $weight = isset($data["weight"]) && $data["weight"] !== "" ? (float)$data["weight"] : null;
   $height = isset($data["height"]) && $data["height"] !== "" ? (float)$data["height"] : null;
   $muac = isset($data["muac"]) && $data["muac"] !== "" ? (float)$data["muac"] : null;
   $bilateralPitting = trim((string)($data["bilateral_pitting"] ?? "No"));
 
   if ($childSeq <= 0) {
-    out(422, ["ok" => false, "message" => "Invalid child_seq"]);
+    out(422, [
+      "ok" => false,
+      "message" => "Invalid child_seq"
+    ]);
   }
 
   if ($dateMeasured === "") {
-    out(422, ["ok" => false, "message" => "date_measured is required"]);
+    out(422, [
+      "ok" => false,
+      "message" => "Date measured is required"
+    ]);
   }
 
-  $userBarangayId = get_user_barangay_id($pdo, $role, $userId);
-
-  $where = ["ci.child_seq = ?"];
-  $params = [$childSeq];
-
-  if ($role !== 'admin') {
-    $where[] = "ci.barangay_id = ?";
-    $params[] = $userBarangayId;
+  if ($assessmentMethod !== "Weight + Length/Height" && $assessmentMethod !== "MUAC") {
+    out(422, [
+      "ok" => false,
+      "message" => "Invalid assessment method"
+    ]);
   }
 
-  $sql = "
+  $stmt = $pdo->prepare("
     SELECT
-      ci.child_seq,
-      ci.sex,
-      ci.date_birth,
-      ci.barangay_id
-    FROM tbl_child_info ci
-    WHERE " . implode(" AND ", $where) . "
+      child_seq,
+      sex,
+      date_birth
+    FROM tbl_child_info
+    WHERE child_seq = ?
     LIMIT 1
-  ";
-
-  $st = $pdo->prepare($sql);
-  $st->execute($params);
-  $child = $st->fetch(PDO::FETCH_ASSOC);
+  ");
+  $stmt->execute([$childSeq]);
+  $child = $stmt->fetch(PDO::FETCH_ASSOC);
 
   if (!$child) {
-    out(404, ["ok" => false, "message" => "Child not found"]);
+    out(404, [
+      "ok" => false,
+      "message" => "Child not found"
+    ]);
   }
 
-  $dateBirth = trim((string)($child["date_birth"] ?? ""));
   $sex = trim((string)($child["sex"] ?? ""));
+  $dateBirth = trim((string)($child["date_birth"] ?? ""));
 
   if ($dateBirth === "") {
-    out(422, ["ok" => false, "message" => "Child date of birth is missing"]);
+    out(422, [
+      "ok" => false,
+      "message" => "Child date of birth is missing"
+    ]);
   }
 
   $birth = new DateTime($dateBirth);
   $measured = new DateTime($dateMeasured);
 
   if ($measured < $birth) {
-    out(422, ["ok" => false, "message" => "Date measured cannot be earlier than date of birth"]);
+    out(422, [
+      "ok" => false,
+      "message" => "Date measured cannot be earlier than date of birth"
+    ]);
   }
 
   $diff = $birth->diff($measured);
   $ageMonths = ($diff->y * 12) + $diff->m;
   $ageDays = (int)$diff->days;
 
-  $weightStatus = null;
-  $heightStatus = null;
-  $ltStatus = null;
-  $muacStatus = null;
+  $weightStatus = '';
+  $heightStatus = '';
+  $ltStatus = '';
+  $muacStatus = '';
 
   if ($assessmentMethod === "Weight + Length/Height") {
-    if ($weight !== null && $height !== null) {
-      $calc = nh_compute_all_statuses(
-        $sex,
-        $dateBirth,
-        $dateMeasured,
-        $weight,
-        $height,
-        null,
-        $bilateralPitting
-      );
-
-      $weightStatus = $calc["weight_status"] ?? null;
-      $heightStatus = $calc["height_status"] ?? null;
-      $ltStatus = $calc["lt_status"] ?? null;
-      $muacStatus = $calc["muac_status"] ?? null;
+    if ($weight === null || $height === null) {
+      out(200, [
+        "ok" => true,
+        "age_months" => $ageMonths,
+        "age_days" => $ageDays,
+        "weight_status" => '',
+        "height_status" => '',
+        "lt_status" => '',
+        "muac_status" => ''
+      ]);
     }
-  } elseif ($assessmentMethod === "MUAC") {
-    if ($muac !== null) {
-      $calc = nh_compute_all_statuses(
-        $sex,
-        $dateBirth,
-        $dateMeasured,
-        null,
-        null,
-        $muac,
-        $bilateralPitting
-      );
 
-      $weightStatus = $calc["weight_status"] ?? null;
-      $heightStatus = $calc["height_status"] ?? null;
-      $ltStatus = $calc["lt_status"] ?? null;
-      $muacStatus = $calc["muac_status"] ?? null;
+    $calc = nh_compute_all_statuses(
+      $sex,
+      $dateBirth,
+      $dateMeasured,
+      $weight,
+      $height,
+      null,
+      $bilateralPitting
+    );
+
+    $weightStatus = $calc["weight_status"] ?? '';
+    $heightStatus = $calc["height_status"] ?? '';
+    $ltStatus = $calc["lt_status"] ?? '';
+    $muacStatus = $calc["muac_status"] ?? '';
+  }
+
+  if ($assessmentMethod === "MUAC") {
+    if ($muac === null) {
+      out(200, [
+        "ok" => true,
+        "age_months" => $ageMonths,
+        "age_days" => $ageDays,
+        "weight_status" => '',
+        "height_status" => '',
+        "lt_status" => '',
+        "muac_status" => ''
+      ]);
     }
-  } else {
-    out(422, ["ok" => false, "message" => "Invalid assessment_method"]);
+
+    $calc = nh_compute_all_statuses(
+      $sex,
+      $dateBirth,
+      $dateMeasured,
+      null,
+      null,
+      $muac,
+      $bilateralPitting
+    );
+
+    $weightStatus = $calc["weight_status"] ?? '';
+    $heightStatus = $calc["height_status"] ?? '';
+    $ltStatus = $calc["lt_status"] ?? '';
+    $muacStatus = $calc["muac_status"] ?? '';
   }
 
   out(200, [
