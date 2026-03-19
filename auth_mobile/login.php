@@ -1,17 +1,15 @@
 <?php
 ob_start();
-session_start();
 
 header("Content-Type: application/json; charset=utf-8");
 
 // --------------------
-// CORS (must NOT be * if using withCredentials)
+// CORS
 // --------------------
 $allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "http://192.168.1.36:3000",
-  "https://nutriwatch.com"
+  "http://192.168.1.36:3000"
 ];
 
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -23,7 +21,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 
-if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
+if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
   http_response_code(200);
   exit;
 }
@@ -34,56 +32,19 @@ require_once __DIR__ . "/../config/db.php";
 use Firebase\JWT\JWT;
 
 // --------------------
-// Settings
+// SETTINGS
 // --------------------
 $FAIL_RESET_MINUTES = getenv("FAIL_RESET_MINUTES");
 $FAIL_RESET_MINUTES = is_numeric($FAIL_RESET_MINUTES) ? (int)$FAIL_RESET_MINUTES : 10;
 if ($FAIL_RESET_MINUTES < 1) $FAIL_RESET_MINUTES = 1;
 
-$FAIL_CAPTCHA_THRESHOLD = 2;
-
 // --------------------
-// Helpers
+// HELPERS
 // --------------------
 function json_input(): array {
   $raw = file_get_contents("php://input");
   $data = json_decode($raw, true);
   return is_array($data) ? $data : [];
-}
-
-function should_require_captcha_random(): bool {
-  $p = getenv("CAPTCHA_PERCENT");
-  $p = is_numeric($p) ? (int)$p : 0;
-  if ($p < 0) $p = 0;
-  if ($p > 100) $p = 100;
-  return random_int(1, 100) <= $p;
-}
-
-function verify_turnstile(string $token): bool {
-  $secret = getenv("TURNSTILE_SECRET_KEY");
-  if (!$secret || $token === "") return false;
-
-  $payload = http_build_query([
-    "secret" => $secret,
-    "response" => $token,
-    "remoteip" => $_SERVER["REMOTE_ADDR"] ?? null,
-  ]);
-
-  $ch = curl_init("https://challenges.cloudflare.com/turnstile/v0/siteverify");
-  curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => $payload,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_HTTPHEADER => ["Content-Type: application/x-www-form-urlencoded"],
-    CURLOPT_TIMEOUT => 10,
-  ]);
-
-  $res = curl_exec($ch);
-  curl_close($ch);
-
-  if (!$res) return false;
-  $json = json_decode($res, true);
-  return !empty($json["success"]);
 }
 
 function get_fail_count(PDO $pdo, string $username, string $ip, int $resetMinutes): int {
@@ -96,18 +57,12 @@ function get_fail_count(PDO $pdo, string $username, string $ip, int $resetMinute
   $failCount = (int)$row["fail_count"];
   $lastFailedAt = strtotime($row["last_failed_at"] ?? "");
 
-  if (!$lastFailedAt) {
-    $del = $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?");
-    $del->execute([$username, $ip]);
-    return 0;
-  }
+  if (!$lastFailedAt) return 0;
 
   $ageSeconds = time() - $lastFailedAt;
-  $resetSeconds = $resetMinutes * 60;
-
-  if ($ageSeconds > $resetSeconds) {
-    $del = $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?");
-    $del->execute([$username, $ip]);
+  if ($ageSeconds > ($resetMinutes * 60)) {
+    $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?")
+        ->execute([$username, $ip]);
     return 0;
   }
 
@@ -126,17 +81,17 @@ function inc_fail_count(PDO $pdo, string $username, string $ip): void {
 }
 
 function reset_fail_count(PDO $pdo, string $username, string $ip): void {
-  $stmt = $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?");
-  $stmt->execute([$username, $ip]);
+  $pdo->prepare("DELETE FROM tbl_login_attempts WHERE username=? AND ip=?")
+      ->execute([$username, $ip]);
 }
 
 // --------------------
 // INPUT
 // --------------------
 $data = json_input();
+
 $username = trim($data["username"] ?? "");
 $password = trim($data["password"] ?? "");
-$captchaToken = trim($data["captchaToken"] ?? "");
 $ip = $_SERVER["REMOTE_ADDR"] ?? "unknown";
 
 if ($username === "" || $password === "") {
@@ -146,66 +101,10 @@ if ($username === "" || $password === "") {
 }
 
 // --------------------
-// Decide if CAPTCHA is required
-// --------------------
-$failCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
-$requireByFails = ($failCount >= $FAIL_CAPTCHA_THRESHOLD);
-
-if (!isset($_SESSION["captcha_decided"])) {
-  $randomRequire = should_require_captcha_random();
-  $_SESSION["captcha_required"] = ($requireByFails || $randomRequire);
-  $_SESSION["captcha_decided"] = true;
-  $_SESSION["captcha_decided_at"] = time();
-} else {
-  if ($requireByFails) $_SESSION["captcha_required"] = true;
-}
-
-if (isset($_SESSION["captcha_decided_at"]) && (time() - $_SESSION["captcha_decided_at"] > 300)) {
-  unset($_SESSION["captcha_decided"], $_SESSION["captcha_required"], $_SESSION["captcha_decided_at"]);
-  $randomRequire = should_require_captcha_random();
-  $_SESSION["captcha_required"] = ($requireByFails || $randomRequire);
-  $_SESSION["captcha_decided"] = true;
-  $_SESSION["captcha_decided_at"] = time();
-}
-
-$captchaRequired = !empty($_SESSION["captcha_required"]);
-
-// --------------------
-// Enforce CAPTCHA if required
-// --------------------
-if ($captchaRequired) {
-  if ($captchaToken === "") {
-    http_response_code(403);
-    echo json_encode([
-      "message" => "CAPTCHA required. Please verify first.",
-      "captcha_required" => true
-    ]);
-    exit;
-  }
-
-  if (!verify_turnstile($captchaToken)) {
-    http_response_code(403);
-    echo json_encode([
-      "message" => "CAPTCHA verification failed. Please try again.",
-      "captcha_required" => true
-    ]);
-    exit;
-  }
-}
-
-// --------------------
 // USER AUTH
 // --------------------
 $stmt = $pdo->prepare("
-  SELECT
-    users_id,
-    username,
-    password,
-    role,
-    status,
-    created_at,
-    must_change_password,
-    password_changed_at
+  SELECT users_id, username, password, role
   FROM tbl_users
   WHERE username = ?
   LIMIT 1
@@ -213,73 +112,17 @@ $stmt = $pdo->prepare("
 $stmt->execute([$username]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$user) {
+if (!$user || !password_verify($password, $user["password"])) {
   inc_fail_count($pdo, $username, $ip);
-
-  $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
-  $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
 
   http_response_code(401);
   echo json_encode([
-    "message" => "Invalid username or password",
-    "captcha_required" => $captchaNow ? true : false
+    "message" => "Invalid username or password"
   ]);
   exit;
 }
 
-if (($user["status"] ?? "") === "disabled") {
-  http_response_code(403);
-  echo json_encode([
-    "message" => "Your account has been disabled. Please contact the administrator."
-  ]);
-  exit;
-}
-
-if (!password_verify($password, $user["password"])) {
-  inc_fail_count($pdo, $username, $ip);
-
-  $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
-  $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
-
-  http_response_code(401);
-  echo json_encode([
-    "message" => "Invalid username or password",
-    "captcha_required" => $captchaNow ? true : false
-  ]);
-  exit;
-}
-
-// --------------------
-// First-login / 30-day disable rule
-// --------------------
-$mustChangePassword = (int)($user["must_change_password"] ?? 0) === 1;
-$passwordChangedAt = $user["password_changed_at"] ?? null;
-$createdAtTs = strtotime($user["created_at"] ?? "");
-$nowTs = time();
-
-if ($mustChangePassword && empty($passwordChangedAt) && $createdAtTs) {
-  $daysSinceCreated = floor(($nowTs - $createdAtTs) / 86400);
-
-  if ($daysSinceCreated >= 30) {
-    $disableStmt = $pdo->prepare("
-      UPDATE tbl_users
-      SET
-        status = 'disabled',
-        account_disabled_at = NOW()
-      WHERE users_id = ?
-      LIMIT 1
-    ");
-    $disableStmt->execute([$user["users_id"]]);
-
-    http_response_code(403);
-    echo json_encode([
-      "message" => "Your account has been disabled because you did not change your initial password within 30 days."
-    ]);
-    exit;
-  }
-}
-
-// Success: reset fail counter
+// SUCCESS
 reset_fail_count($pdo, $username, $ip);
 
 // --------------------
@@ -288,9 +131,9 @@ reset_fail_count($pdo, $username, $ip);
 $secretKey = getenv("JWT_SECRET") ?: "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#";
 
 $payload = [
-  "iss" => "my-app",
+  "iss" => "nutriwatch-mobile",
   "iat" => time(),
-  "exp" => time() + 3600,
+  "exp" => time() + 86400, // 🔥 24 hours for mobile
   "sub" => $user["users_id"],
   "username" => $user["username"],
   "role" => $user["role"]
@@ -298,15 +141,15 @@ $payload = [
 
 $jwt = JWT::encode($payload, $secretKey, "HS256");
 
-// Clear captcha session state after successful login
-unset($_SESSION["captcha_decided"], $_SESSION["captcha_required"], $_SESSION["captcha_decided_at"]);
-
+// --------------------
+// RESPONSE
+// --------------------
 echo json_encode([
+  "ok" => true,
   "token" => $jwt,
   "user" => [
     "id" => $user["users_id"],
     "username" => $user["username"],
     "role" => $user["role"]
-  ],
-  "force_password_change" => $mustChangePassword && empty($passwordChangedAt)
+  ]
 ]);

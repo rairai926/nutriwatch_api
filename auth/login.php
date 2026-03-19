@@ -10,7 +10,8 @@ header("Content-Type: application/json; charset=utf-8");
 $allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "http://192.168.1.36:3000"
+  "http://192.168.1.36:3000",
+  "https://nutriwatch.com"
 ];
 
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -22,7 +23,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 
-if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
   http_response_code(200);
   exit;
 }
@@ -33,13 +34,13 @@ require_once __DIR__ . "/../config/db.php";
 use Firebase\JWT\JWT;
 
 // --------------------
-// Settings (NOW from ENV)
+// Settings
 // --------------------
 $FAIL_RESET_MINUTES = getenv("FAIL_RESET_MINUTES");
-$FAIL_RESET_MINUTES = is_numeric($FAIL_RESET_MINUTES) ? (int)$FAIL_RESET_MINUTES : 10; // default 10
+$FAIL_RESET_MINUTES = is_numeric($FAIL_RESET_MINUTES) ? (int)$FAIL_RESET_MINUTES : 10;
 if ($FAIL_RESET_MINUTES < 1) $FAIL_RESET_MINUTES = 1;
 
-$FAIL_CAPTCHA_THRESHOLD = 2; // show captcha after 2 failed attempts
+$FAIL_CAPTCHA_THRESHOLD = 2;
 
 // --------------------
 // Helpers
@@ -85,7 +86,6 @@ function verify_turnstile(string $token): bool {
   return !empty($json["success"]);
 }
 
-// --- Attempts logic (auto reset)
 function get_fail_count(PDO $pdo, string $username, string $ip, int $resetMinutes): int {
   $stmt = $pdo->prepare("SELECT fail_count, last_failed_at FROM tbl_login_attempts WHERE username=? AND ip=? LIMIT 1");
   $stmt->execute([$username, $ip]);
@@ -147,8 +147,6 @@ if ($username === "" || $password === "") {
 
 // --------------------
 // Decide if CAPTCHA is required
-// Rule: CAPTCHA if fail_count >= 2 OR random%
-// Keep decision in session for consistency
 // --------------------
 $failCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
 $requireByFails = ($failCount >= $FAIL_CAPTCHA_THRESHOLD);
@@ -162,7 +160,6 @@ if (!isset($_SESSION["captcha_decided"])) {
   if ($requireByFails) $_SESSION["captcha_required"] = true;
 }
 
-// Expire captcha decision after 5 min
 if (isset($_SESSION["captcha_decided_at"]) && (time() - $_SESSION["captcha_decided_at"] > 300)) {
   unset($_SESSION["captcha_decided"], $_SESSION["captcha_required"], $_SESSION["captcha_decided_at"]);
   $randomRequire = should_require_captcha_random();
@@ -199,11 +196,24 @@ if ($captchaRequired) {
 // --------------------
 // USER AUTH
 // --------------------
-$stmt = $pdo->prepare("SELECT users_id, username, password, role FROM tbl_users WHERE username = ? LIMIT 1");
+$stmt = $pdo->prepare("
+  SELECT
+    users_id,
+    username,
+    password,
+    role,
+    status,
+    created_at,
+    must_change_password,
+    password_changed_at
+  FROM tbl_users
+  WHERE username = ?
+  LIMIT 1
+");
 $stmt->execute([$username]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$user || !password_verify($password, $user["password"])) {
+if (!$user) {
   inc_fail_count($pdo, $username, $ip);
 
   $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
@@ -215,6 +225,58 @@ if (!$user || !password_verify($password, $user["password"])) {
     "captcha_required" => $captchaNow ? true : false
   ]);
   exit;
+}
+
+if (($user["status"] ?? "") === "disabled") {
+  http_response_code(403);
+  echo json_encode([
+    "message" => "Your account has been disabled. Please contact the administrator."
+  ]);
+  exit;
+}
+
+if (!password_verify($password, $user["password"])) {
+  inc_fail_count($pdo, $username, $ip);
+
+  $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
+  $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
+
+  http_response_code(401);
+  echo json_encode([
+    "message" => "Invalid username or password",
+    "captcha_required" => $captchaNow ? true : false
+  ]);
+  exit;
+}
+
+// --------------------
+// First-login / 30-day disable rule
+// --------------------
+$mustChangePassword = (int)($user["must_change_password"] ?? 0) === 1;
+$passwordChangedAt = $user["password_changed_at"] ?? null;
+$createdAtTs = strtotime($user["created_at"] ?? "");
+$nowTs = time();
+
+if ($mustChangePassword && empty($passwordChangedAt) && $createdAtTs) {
+  $daysSinceCreated = floor(($nowTs - $createdAtTs) / 86400);
+
+  if ($daysSinceCreated >= 30) {
+    $disableStmt = $pdo->prepare("
+      UPDATE tbl_users
+      SET
+        status = 'disabled',
+        account_disabled_at = NOW()
+      WHERE users_id = ?
+      LIMIT 1
+    ");
+    $disableStmt->execute([$user["users_id"]]);
+
+    http_response_code(403);
+    echo json_encode([
+      "message" => "Your account has been disabled because you did not change your initial password within 30 days."
+    ]);
+    exit;
+  }
 }
 
 // Success: reset fail counter
@@ -245,5 +307,6 @@ echo json_encode([
     "id" => $user["users_id"],
     "username" => $user["username"],
     "role" => $user["role"]
-  ]
+  ],
+  "force_password_change" => $mustChangePassword && empty($passwordChangedAt)
 ]);
