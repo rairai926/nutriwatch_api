@@ -227,7 +227,9 @@ if (!$user) {
   exit;
 }
 
-if (($user["status"] ?? "") === "disabled") {
+// active = allowed
+// inactive = blocked/disabled
+if (($user["status"] ?? "") !== "active") {
   http_response_code(403);
   echo json_encode([
     "message" => "Your account has been disabled. Please contact the administrator."
@@ -264,7 +266,7 @@ if ($mustChangePassword && empty($passwordChangedAt) && $createdAtTs) {
     $disableStmt = $pdo->prepare("
       UPDATE tbl_users
       SET
-        status = 'disabled',
+        status = 'inactive',
         account_disabled_at = NOW()
       WHERE users_id = ?
       LIMIT 1
