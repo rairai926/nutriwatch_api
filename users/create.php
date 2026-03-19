@@ -24,9 +24,22 @@ $hash = password_hash($password, PASSWORD_ARGON2ID);
 
 $stmt = $pdo->prepare("
   INSERT INTO tbl_users
-    (lastname, firstname, middlename, email, username, password, role, barangay_id, status, created_at)
+    (
+      lastname,
+      firstname,
+      middlename,
+      email,
+      username,
+      password,
+      must_change_password,
+      password_changed_at,
+      role,
+      barangay_id,
+      status,
+      created_at
+    )
   VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    (?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NOW())
 ");
 $stmt->execute([
   $lastname,
