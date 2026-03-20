@@ -1,17 +1,15 @@
 FROM php:8.3-apache
 
-# Enable Apache rewrite
-RUN a2enmod rewrite
-
-# Install system dependencies + PHP extensions FIRST
-RUN apt-get update \
+# Enable rewrite + install extensions
+RUN a2enmod rewrite \
+  && apt-get update \
   && apt-get install -y --no-install-recommends \
       git unzip ca-certificates \
       libzip-dev \
       libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
       libcurl4-openssl-dev \
   \
-  # Configure GD properly
+  # Configure GD (required for PhpSpreadsheet)
   && docker-php-ext-configure gd --with-freetype --with-jpeg \
   \
   # Install PHP extensions
@@ -24,10 +22,7 @@ RUN apt-get update \
   \
   && rm -rf /var/lib/apt/lists/*
 
-# Verify extensions BEFORE composer (IMPORTANT)
-RUN php -m | grep -E "gd|zip"
-
-# Avoid Apache warning
+# Avoid Apache ServerName warning
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
 # Install Composer
@@ -35,27 +30,30 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Copy composer files
+# Copy composer files first (better build cache)
 COPY composer.json composer.lock* ./
 
-# Install dependencies (IGNORE PLATFORM CHECKS)
+# Install PHP deps (IGNORE platform reqs for Docker) + verify packages
 RUN composer install \
     --no-dev \
     --prefer-dist \
     --no-interaction \
     --optimize-autoloader \
-    --ignore-platform-reqs
+    --ignore-platform-reqs \
+ \
+ && composer show firebase/php-jwt \
+ && composer show phpoffice/phpspreadsheet \
+ \
+ && php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('Firebase\\\\JWT\\\\JWT') ? 'JWT OK\n' : 'JWT MISSING\n';" \
+ && php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('PhpOffice\\\\PhpSpreadsheet\\\\IOFactory') ? 'PHPSPREADSHEET OK\n' : 'PHPSPREADSHEET MISSING\n';"
 
-# Verify PhpSpreadsheet
-RUN php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('PhpOffice\\\\PhpSpreadsheet\\\\IOFactory') ? 'PHPSPREADSHEET OK\n' : 'PHPSPREADSHEET MISSING\n';"
-
-# Copy app files
+# Copy the rest of the app
 COPY . .
 
 # Permissions
 RUN chown -R www-data:www-data /var/www/html
 
-# Render start script
+# Render start script (bind Apache to $PORT)
 RUN printf '%s\n' \
 '#!/bin/sh' \
 'set -e' \
