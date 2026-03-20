@@ -38,14 +38,15 @@ WORKDIR /var/www/html
 # Copy composer files
 COPY composer.json composer.lock* ./
 
-# Install dependencies (NOW gd + zip exist)
+# Install dependencies (IGNORE PLATFORM CHECKS)
 RUN composer install \
     --no-dev \
     --prefer-dist \
     --no-interaction \
-    --optimize-autoloader
+    --optimize-autoloader \
+    --ignore-platform-reqs
 
-# Verify PhpSpreadsheet (CRITICAL DEBUG)
+# Verify PhpSpreadsheet
 RUN php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('PhpOffice\\\\PhpSpreadsheet\\\\IOFactory') ? 'PHPSPREADSHEET OK\n' : 'PHPSPREADSHEET MISSING\n';"
 
 # Copy app files
