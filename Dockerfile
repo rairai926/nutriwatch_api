@@ -1,11 +1,25 @@
 FROM php:8.3-apache
 
-# Enable rewrite + install extensions
+# Enable rewrite + install system dependencies
 RUN a2enmod rewrite \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
-      git unzip ca-certificates libzip-dev libcurl4-openssl-dev \
-  && docker-php-ext-install pdo pdo_mysql zip curl \
+      git unzip ca-certificates \
+      libzip-dev \
+      libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
+      libcurl4-openssl-dev \
+  \
+  # Configure GD properly (REQUIRED for PhpSpreadsheet)
+  && docker-php-ext-configure gd --with-freetype --with-jpeg \
+  \
+  # Install PHP extensions
+  && docker-php-ext-install \
+      pdo \
+      pdo_mysql \
+      zip \
+      curl \
+      gd \
+  \
   && rm -rf /var/lib/apt/lists/*
 
 # Avoid Apache ServerName warning
@@ -16,13 +30,13 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Copy composer files first (better build cache + ensures deps install correctly)
+# Copy composer files first
 COPY composer.json composer.lock* ./
 
-# Install PHP deps and verify firebase/php-jwt exists
+# Install dependencies (INCLUDING PhpSpreadsheet)
 RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader \
- && composer show firebase/php-jwt \
- && php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('Firebase\\\\JWT\\\\JWT') ? 'JWT OK' : 'JWT MISSING';"
+ && php -m | grep -E "gd|zip" \
+ && php -r "require '/var/www/html/vendor/autoload.php'; echo class_exists('PhpOffice\\\\PhpSpreadsheet\\\\Spreadsheet') ? 'PHPSPREADSHEET OK' : 'PHPSPREADSHEET MISSING';"
 
 # Copy the rest of the app
 COPY . .
