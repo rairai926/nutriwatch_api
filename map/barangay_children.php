@@ -35,10 +35,12 @@ $authUser = authenticate(['admin', 'user', 'bns']);
 $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
+$barangayId = (int)($_GET['barangay_id'] ?? 0);
 $barangayCode = strtoupper(preg_replace('/\s+/u', '', trim($_GET['barangay_code'] ?? '')));
-if ($barangayCode === '') {
+
+if ($barangayId <= 0 && $barangayCode === '') {
   http_response_code(400);
-  echo json_encode(["message" => "barangay_code is required"]);
+  echo json_encode(["message" => "barangay_id or barangay_code is required"]);
   exit;
 }
 
@@ -60,20 +62,42 @@ if ($role !== 'admin') {
 
 // --------------------
 // Resolve requested barangay
+// Prefer barangay_id, fallback to cleaned barangay_code
 // --------------------
-$sqlBarangay = "
-  SELECT barangay_id, barangay_name, barangay_code
-  FROM tbl_barangay
-  WHERE UPPER(REPLACE(REPLACE(COALESCE(barangay_code,''), ' ', ''), '\n', '')) = ?
-  LIMIT 1
-";
-$st = $pdo->prepare($sqlBarangay);
-$st->execute([$barangayCode]);
-$barangay = $st->fetch(PDO::FETCH_ASSOC);
+$barangay = null;
+
+if ($barangayId > 0) {
+  $st = $pdo->prepare("
+    SELECT barangay_id, barangay_name, barangay_code
+    FROM tbl_barangay
+    WHERE barangay_id = ?
+    LIMIT 1
+  ");
+  $st->execute([$barangayId]);
+  $barangay = $st->fetch(PDO::FETCH_ASSOC);
+}
+
+if (!$barangay && $barangayCode !== '') {
+  $sqlBarangay = "
+    SELECT barangay_id, barangay_name, barangay_code
+    FROM tbl_barangay
+    WHERE UPPER(REGEXP_REPLACE(COALESCE(barangay_code,''), '[[:space:]]+', '')) = ?
+    LIMIT 1
+  ";
+  $st = $pdo->prepare($sqlBarangay);
+  $st->execute([$barangayCode]);
+  $barangay = $st->fetch(PDO::FETCH_ASSOC);
+}
 
 if (!$barangay) {
   http_response_code(404);
-  echo json_encode(["message" => "Barangay not found"]);
+  echo json_encode([
+    "message" => "Barangay not found",
+    "debug" => [
+      "barangay_id" => $barangayId,
+      "barangay_code" => $barangayCode
+    ]
+  ]);
   exit;
 }
 
