@@ -17,7 +17,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
 }
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
-if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
   http_response_code(200);
   exit;
 }
@@ -26,7 +26,6 @@ require_once __DIR__ . "/../vendor/autoload.php";
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
 
-// allow admin + bns
 $user = authenticate(['admin', 'user']);
 $role = $user->role ?? 'user';
 $userId = (int)($user->sub ?? 0);
@@ -46,7 +45,6 @@ if ($role !== 'admin') {
   }
 }
 
-// Build WHERE for child scope
 $childWhere = "";
 $params = [];
 if ($role !== 'admin') {
@@ -54,7 +52,6 @@ if ($role !== 'admin') {
   $params[] = $barangayId;
 }
 
-// Quarter start (MySQL expression)
 $quarterSql = "
   CASE
     WHEN QUARTER(CURDATE()) = 1 THEN MAKEDATE(YEAR(CURDATE()), 1)
@@ -64,7 +61,6 @@ $quarterSql = "
   END
 ";
 
-// Latest measurement per child
 $latestJoin = "
   JOIN (
     SELECT child_seq, MAX(date_measured) AS max_date
@@ -90,13 +86,21 @@ $st = $pdo->prepare($sqlMeasuredQ);
 $st->execute($role !== 'admin' ? [$barangayId] : []);
 $measuredThisQuarter = (int)($st->fetchColumn() ?: 0);
 
-// High risk children (latest measurement, lt_status not Normal or null)
+// Better high-risk count
 $sqlHighRisk = "
   SELECT COUNT(*) AS high_risk
   FROM tbl_measurement m
   $latestJoin
   JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
-  WHERE (m.lt_status IS NULL OR m.lt_status <> 'Normal')
+  WHERE (
+    LOWER(COALESCE(m.weight_status,'')) IN ('underweight','severely underweight')
+    OR LOWER(COALESCE(m.height_status,'')) IN ('stunted','severely stunted')
+    OR LOWER(COALESCE(m.lt_status,'')) IN ('wasted','severely wasted','overweight','obese')
+    OR LOWER(COALESCE(m.muac_status,'')) LIKE '%yellow%'
+    OR LOWER(COALESCE(m.muac_status,'')) LIKE '%red%'
+    OR LOWER(COALESCE(m.muac_status,'')) LIKE '%mam%'
+    OR LOWER(COALESCE(m.muac_status,'')) LIKE '%sam%'
+  )
   " . ($role !== 'admin' ? "AND ci.barangay_id = ?" : "");
 $st = $pdo->prepare($sqlHighRisk);
 $st->execute($role !== 'admin' ? [$barangayId] : []);
@@ -104,9 +108,7 @@ $highRisk = (int)($st->fetchColumn() ?: 0);
 
 $coverage = ($totalChildren > 0) ? round(($measuredThisQuarter / $totalChildren) * 100, 1) : 0.0;
 
-// ------------------------------
-// ALERT 1: Children without recent measurement (90 days)
-// ------------------------------
+// Alert 1
 $sqlNoRecent = "
   SELECT COUNT(*)
   FROM tbl_child_info ci
@@ -120,12 +122,11 @@ $sqlNoRecent = "
     OR lm.last_date < DATE_SUB(CURDATE(), INTERVAL 90 DAY)
   )
   " . ($role !== 'admin' ? "AND ci.barangay_id = ?" : "");
-
 $st = $pdo->prepare($sqlNoRecent);
 $st->execute($role !== 'admin' ? [$barangayId] : []);
 $noRecentMeasurement = (int)($st->fetchColumn() ?: 0);
 
-// Recent measurements (latest 10 within scope)
+// Recent measurements
 $sqlRecent = "
   SELECT
     m.child_seq,
@@ -144,9 +145,7 @@ $st = $pdo->prepare($sqlRecent);
 $st->execute($role !== 'admin' ? [$barangayId] : []);
 $recent = $st->fetchAll(PDO::FETCH_ASSOC);
 
-// ------------------------------
-// FOLLOW-UP LIST (BNS FOCUS)
-// ------------------------------
+// Follow-up list with visited state
 $sqlFollowUp = "
   SELECT
     ci.child_seq,
@@ -157,7 +156,8 @@ $sqlFollowUp = "
     m.weight_status,
     m.height_status,
     m.lt_status,
-    m.muac_status
+    m.muac_status,
+    fv.last_visited_at
   FROM tbl_child_info ci
   JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
 
@@ -171,24 +171,13 @@ $sqlFollowUp = "
     ON m.child_seq = ci.child_seq
    AND m.date_measured = lm.last_date
 
-  " . ($role !== 'admin' ? "WHERE ci.barangay_id = ?" : "") . "
+  LEFT JOIN (
+    SELECT child_seq, MAX(visited_at) AS last_visited_at
+    FROM tbl_follow_up_visits
+    GROUP BY child_seq
+  ) fv ON fv.child_seq = ci.child_seq
 
-  ORDER BY
-    (
-      CASE
-        WHEN lm.last_date IS NULL THEN 1
-        WHEN lm.last_date < DATE_SUB(CURDATE(), INTERVAL 90 DAY) THEN 1
-        ELSE 0
-      END
-    ) DESC,
-    (
-      CASE
-        WHEN m.lt_status IS NULL OR m.lt_status <> 'Normal' THEN 1
-        ELSE 0
-      END
-    ) DESC,
-    lm.last_date ASC
-  LIMIT 20
+  " . ($role !== 'admin' ? "WHERE ci.barangay_id = ?" : "") . "
 ";
 
 $st = $pdo->prepare($sqlFollowUp);
@@ -196,15 +185,36 @@ $st->execute($role !== 'admin' ? [$barangayId] : []);
 $followUpRows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 $followUp = [];
+$highRiskFollowUps = 0;
 
 foreach ($followUpRows as $r) {
   $lastDate = $r['date_measured'] ?? null;
+
+  $weight = strtolower(trim((string)($r['weight_status'] ?? '')));
+  $height = strtolower(trim((string)($r['height_status'] ?? '')));
+  $lt = strtolower(trim((string)($r['lt_status'] ?? '')));
+  $muac = strtolower(trim((string)($r['muac_status'] ?? '')));
+
   $isOverdue = !$lastDate || strtotime($lastDate) < strtotime('-90 days');
 
-  $lt = strtolower(trim((string)($r['lt_status'] ?? '')));
-  $isHighRisk = $lt !== '' && $lt !== 'normal';
+  $isHighRisk =
+    in_array($weight, ['underweight', 'severely underweight'], true) ||
+    in_array($height, ['stunted', 'severely stunted'], true) ||
+    in_array($lt, ['wasted', 'severely wasted', 'overweight', 'obese'], true) ||
+    str_contains($muac, 'yellow') ||
+    str_contains($muac, 'red') ||
+    str_contains($muac, 'mam') ||
+    str_contains($muac, 'sam');
+
+  $lastVisitedAt = $r['last_visited_at'] ?? null;
+  $visitedRecently = $lastVisitedAt && strtotime($lastVisitedAt) >= strtotime('-30 days');
+
+  if ($isHighRisk) {
+    $highRiskFollowUps++;
+  }
 
   $statusTag = $isHighRisk ? 'high-risk' : ($isOverdue ? 'overdue' : 'normal');
+  $priorityRank = $isHighRisk ? 1 : ($isOverdue ? 2 : 3);
 
   $followUp[] = [
     "child_seq" => (int)$r['child_seq'],
@@ -220,11 +230,28 @@ foreach ($followUpRows as $r) {
     "weight_status" => $r['weight_status'] ?? '',
     "height_status" => $r['height_status'] ?? '',
     "muac_status" => $r['muac_status'] ?? '',
-    "status_tag" => $statusTag
+    "status_tag" => $statusTag,
+    "priority_rank" => $priorityRank,
+    "last_visited_at" => $lastVisitedAt,
+    "visited_recently" => (bool)$visitedRecently
   ];
 }
 
-// Admin-only: top barangays by coverage
+usort($followUp, function ($a, $b) {
+  if ($a['visited_recently'] !== $b['visited_recently']) {
+    return $a['visited_recently'] ? 1 : -1; // pending first
+  }
+  if ($a['priority_rank'] !== $b['priority_rank']) {
+    return $a['priority_rank'] <=> $b['priority_rank']; // high-risk, overdue, normal
+  }
+  $aDate = $a['date_measured'] ?: '1900-01-01';
+  $bDate = $b['date_measured'] ?: '1900-01-01';
+  return strcmp($aDate, $bDate); // oldest first
+});
+
+$followUp = array_slice($followUp, 0, 20);
+
+// Admin-only
 $topBarangays = [];
 if ($role === 'admin') {
   $sqlTop = "
@@ -252,11 +279,7 @@ if ($role === 'admin') {
   $topBarangays = $pdo->query($sqlTop)->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// ------------------------------
-// ALERT 2: Barangays below coverage threshold (Admin only)
-// ------------------------------
 $belowCoverageCount = 0;
-
 if ($role === 'admin') {
   $sqlBelow = "
     SELECT COUNT(*) FROM (
@@ -279,7 +302,6 @@ if ($role === 'admin') {
       ) < 80
     ) t
   ";
-
   $belowCoverageCount = (int)($pdo->query($sqlBelow)->fetchColumn() ?: 0);
 }
 
@@ -294,7 +316,8 @@ echo json_encode([
   ],
   "alerts" => [
     "no_recent_measurement" => $noRecentMeasurement,
-    "below_coverage_barangays" => $belowCoverageCount
+    "below_coverage_barangays" => $belowCoverageCount,
+    "high_risk_follow_ups" => $highRiskFollowUps
   ],
   "recent_measurements" => $recent,
   "follow_up_children" => $followUp,
