@@ -52,6 +52,8 @@ try {
   $data = json_decode($raw, true);
   if (!is_array($data)) $data = [];
 
+  $forceSave = !empty($data['force_save']);
+
   // Child
   $c_lastname   = trim((string)($data['c_lastname'] ?? ''));
   $c_firstname  = trim((string)($data['c_firstname'] ?? ''));
@@ -66,18 +68,14 @@ try {
   $g_middlename = trim((string)($data['g_middlename'] ?? ''));
 
   // Other details
-  $date_birth = trim((string)($data['date_birth'] ?? '')); // YYYY-MM-DD recommended
-  $ip_group   = trim((string)($data['ip_group'] ?? ''));   // store as text (Yes/No or group name)
+  $date_birth = trim((string)($data['date_birth'] ?? ''));
+  $ip_group   = trim((string)($data['ip_group'] ?? ''));
   $disability = trim((string)($data['disability'] ?? ''));
 
   if ($c_lastname === '' || $c_firstname === '') {
     out(422, ["ok" => false, "message" => "Child first name and last name are required"]);
   }
 
-  // Guardian optional? (If you want required, enforce it here)
-  // if ($g_lastname === '' || $g_firstname === '') out(422, ["ok"=>false,"message"=>"Guardian name is required"]);
-
-  // normalize sex
   $sexLower = strtolower($sex);
   if (in_array($sexLower, ['m', 'male', 'boy', 'boys'], true)) $sex = 'Male';
   if (in_array($sexLower, ['f', 'female', 'girl', 'girls'], true)) $sex = 'Female';
@@ -85,13 +83,9 @@ try {
     out(422, ["ok" => false, "message" => "Sex must be Male or Female"]);
   }
 
-  // Default city/province = 1 (as requested)
   $province_id = 1;
   $city_id = 1;
 
-  // Resolve barangay:
-  // Admin => can specify barangay_id
-  // user/bns => forced to their barangay_id
   $barangay_id = 0;
 
   if ($role === 'admin') {
@@ -109,12 +103,72 @@ try {
     }
   }
 
-  // Validate date_birth if provided
   if ($date_birth !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_birth)) {
     out(422, ["ok" => false, "message" => "date_birth must be YYYY-MM-DD"]);
   }
 
-  // Insert
+  // --------------------
+  // Duplicate detection
+  // Rule: same barangay + same first/last name + same birth date
+  // Soft expansion: same barangay + same first/last name even if birth date missing
+  // --------------------
+  $dupSql = "
+    SELECT
+      ci.child_seq,
+      ci.c_firstname,
+      ci.c_middlename,
+      ci.c_lastname,
+      ci.sex,
+      ci.date_birth,
+      ci.purok,
+      b.barangay_name
+    FROM tbl_child_info ci
+    LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
+    WHERE ci.barangay_id = :barangay_id
+      AND LOWER(TRIM(ci.c_firstname)) = LOWER(TRIM(:c_firstname))
+      AND LOWER(TRIM(ci.c_lastname)) = LOWER(TRIM(:c_lastname))
+      AND (
+        (:date_birth <> '' AND ci.date_birth = :date_birth_exact)
+        OR
+        (:date_birth = '')
+      )
+    ORDER BY ci.child_seq DESC
+    LIMIT 10
+  ";
+
+  $dupSt = $pdo->prepare($dupSql);
+  $dupSt->execute([
+    ':barangay_id' => $barangay_id,
+    ':c_firstname' => $c_firstname,
+    ':c_lastname' => $c_lastname,
+    ':date_birth' => $date_birth,
+    ':date_birth_exact' => ($date_birth !== '' ? $date_birth : null)
+  ]);
+
+  $duplicates = $dupSt->fetchAll(PDO::FETCH_ASSOC);
+
+  if (!$forceSave && !empty($duplicates)) {
+    out(409, [
+      "ok" => false,
+      "message" => "Possible duplicate child record found.",
+      "duplicate_warning" => true,
+      "duplicates" => array_map(function ($r) {
+        return [
+          "child_seq" => (int)$r["child_seq"],
+          "child_name" => trim(implode(' ', array_filter([
+            $r["c_firstname"] ?? '',
+            $r["c_middlename"] ?? '',
+            $r["c_lastname"] ?? ''
+          ]))),
+          "sex" => $r["sex"] ?? '',
+          "date_birth" => $r["date_birth"] ?? null,
+          "purok" => $r["purok"] ?? '',
+          "barangay_name" => $r["barangay_name"] ?? ''
+        ];
+      }, $duplicates)
+    ]);
+  }
+
   $sql = "
     INSERT INTO tbl_child_info
       (province_id, city_id, barangay_id, purok,
