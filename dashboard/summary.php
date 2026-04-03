@@ -144,6 +144,86 @@ $st = $pdo->prepare($sqlRecent);
 $st->execute($role !== 'admin' ? [$barangayId] : []);
 $recent = $st->fetchAll(PDO::FETCH_ASSOC);
 
+// ------------------------------
+// FOLLOW-UP LIST (BNS FOCUS)
+// ------------------------------
+$sqlFollowUp = "
+  SELECT
+    ci.child_seq,
+    ci.c_firstname, ci.c_middlename, ci.c_lastname,
+    ci.sex,
+    b.barangay_name,
+    lm.last_date AS date_measured,
+    m.weight_status,
+    m.height_status,
+    m.lt_status,
+    m.muac_status
+  FROM tbl_child_info ci
+  JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
+
+  LEFT JOIN (
+    SELECT child_seq, MAX(date_measured) AS last_date
+    FROM tbl_measurement
+    GROUP BY child_seq
+  ) lm ON lm.child_seq = ci.child_seq
+
+  LEFT JOIN tbl_measurement m
+    ON m.child_seq = ci.child_seq
+   AND m.date_measured = lm.last_date
+
+  " . ($role !== 'admin' ? "WHERE ci.barangay_id = ?" : "") . "
+
+  ORDER BY
+    (
+      CASE
+        WHEN lm.last_date IS NULL THEN 1
+        WHEN lm.last_date < DATE_SUB(CURDATE(), INTERVAL 90 DAY) THEN 1
+        ELSE 0
+      END
+    ) DESC,
+    (
+      CASE
+        WHEN m.lt_status IS NULL OR m.lt_status <> 'Normal' THEN 1
+        ELSE 0
+      END
+    ) DESC,
+    lm.last_date ASC
+  LIMIT 20
+";
+
+$st = $pdo->prepare($sqlFollowUp);
+$st->execute($role !== 'admin' ? [$barangayId] : []);
+$followUpRows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+$followUp = [];
+
+foreach ($followUpRows as $r) {
+  $lastDate = $r['date_measured'] ?? null;
+  $isOverdue = !$lastDate || strtotime($lastDate) < strtotime('-90 days');
+
+  $lt = strtolower(trim((string)($r['lt_status'] ?? '')));
+  $isHighRisk = $lt !== '' && $lt !== 'normal';
+
+  $statusTag = $isHighRisk ? 'high-risk' : ($isOverdue ? 'overdue' : 'normal');
+
+  $followUp[] = [
+    "child_seq" => (int)$r['child_seq'],
+    "child_name" => trim(implode(' ', array_filter([
+      $r['c_firstname'] ?? '',
+      $r['c_middlename'] ?? '',
+      $r['c_lastname'] ?? ''
+    ]))),
+    "sex" => $r['sex'] ?? '',
+    "barangay_name" => $r['barangay_name'] ?? '',
+    "date_measured" => $lastDate,
+    "lt_status" => $r['lt_status'] ?? '',
+    "weight_status" => $r['weight_status'] ?? '',
+    "height_status" => $r['height_status'] ?? '',
+    "muac_status" => $r['muac_status'] ?? '',
+    "status_tag" => $statusTag
+  ];
+}
+
 // Admin-only: top barangays by coverage
 $topBarangays = [];
 if ($role === 'admin') {
@@ -217,5 +297,6 @@ echo json_encode([
     "below_coverage_barangays" => $belowCoverageCount
   ],
   "recent_measurements" => $recent,
+  "follow_up_children" => $followUp,
   "top_barangays" => $topBarangays
 ]);
