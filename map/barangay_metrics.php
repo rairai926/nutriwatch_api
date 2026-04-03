@@ -31,7 +31,7 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
 
-$authUser = authenticate(['admin', 'user', 'bns']); // allow bns too (safe)
+$authUser = authenticate(['admin', 'user', 'bns']);
 $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
@@ -51,7 +51,7 @@ $restrictToBarangay = true;
 
 $barangayId = 0;
 if ($role !== 'admin') {
-  $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+  $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
   $st->execute([$userId]);
   $barangayId = (int)($st->fetchColumn() ?: 0);
 
@@ -106,8 +106,6 @@ $latestTieBreaker = "
 
 // --------------------
 // Barangay base list + counts + assigned BNS
-// IMPORTANT: clean barangay_code (remove \r\n spaces)
-// IMPORTANT: role for BNS might be 'bns' OR 'user' in your system
 // --------------------
 $whereBarangay = "";
 $params = [];
@@ -157,7 +155,6 @@ $byId = [];
 foreach ($barangays as $b) {
   $id = (int)$b["barangay_id"];
 
-  // ✅ Strong cleaning: remove ANY whitespace and upper
   $cleanCode = strtoupper(preg_replace('/\s+/u', '', (string)($b["barangay_code"] ?? "")));
 
   $byId[$id] = [
@@ -174,6 +171,8 @@ foreach ($barangays as $b) {
     "measured_children" => 0,
     "last_measurement_date" => null,
     "normal_pct" => 0,
+    "coverage_pct" => 0,
+    "priority_level" => "low",
 
     "breakdowns" => [
       $metric => []
@@ -262,13 +261,32 @@ foreach ($byId as $bid => &$out) {
     $measured = (int)$tmpAgg[$bid]["measured"];
     $normal   = (int)($normalMap[$bid] ?? 0);
 
+    $coverage = $out["total_children"] > 0
+      ? round(($measured / $out["total_children"]) * 100, 1)
+      : 0;
+
+    $normalPct = $measured > 0
+      ? round(($normal / $measured) * 100, 1)
+      : 0;
+
     $out["measured_children"] = $measured;
     $out["last_measurement_date"] = $tmpAgg[$bid]["last"];
-    $out["normal_pct"] = $measured > 0 ? round(($normal / $measured) * 100, 1) : 0;
+    $out["normal_pct"] = $normalPct;
+    $out["coverage_pct"] = $coverage;
+
+    if ($coverage < 50 || $normalPct < 50) {
+      $out["priority_level"] = "high";
+    } elseif ($coverage < 80 || $normalPct < 80) {
+      $out["priority_level"] = "medium";
+    } else {
+      $out["priority_level"] = "low";
+    }
 
     usort($tmpAgg[$bid]["breakdown"], fn($a, $b) => $b["total"] <=> $a["total"]);
     $out["breakdowns"][$metric] = $tmpAgg[$bid]["breakdown"];
   }
 }
+
+unset($out);
 
 echo json_encode(array_values($byId));
