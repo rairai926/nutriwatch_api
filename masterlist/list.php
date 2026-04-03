@@ -42,8 +42,7 @@ $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
 // --------------------
-// Params (MATCH your React)
-// view: all | updated | outdated | archive
+// Params
 // --------------------
 $view = trim($_GET['view'] ?? 'all');
 $allowedViews = ['all', 'updated', 'outdated', 'archive'];
@@ -54,8 +53,18 @@ $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
 if ($page < 1) $page = 1;
 if ($limit < 1) $limit = 1;
 if ($limit > 100) $limit = 100;
-
 $offset = ($page - 1) * $limit;
+
+$q = trim((string)($_GET['q'] ?? ''));
+$sex = trim((string)($_GET['sex'] ?? ''));
+$measurement = trim((string)($_GET['measurement'] ?? 'all')); // all|with|without
+$sort = trim((string)($_GET['sort'] ?? 'latest')); // latest|oldest|name_asc|name_desc
+
+$allowedMeasurement = ['all', 'with', 'without'];
+if (!in_array($measurement, $allowedMeasurement, true)) $measurement = 'all';
+
+$allowedSort = ['latest', 'oldest', 'name_asc', 'name_desc'];
+if (!in_array($sort, $allowedSort, true)) $sort = 'latest';
 
 // --------------------
 // Restrict for non-admin to their barangay
@@ -80,7 +89,7 @@ $firstDay = date('Y-m-01');
 $nextMonthFirstDay = date('Y-m-01', strtotime('+1 month', strtotime($firstDay)));
 
 // --------------------
-// ARCHIVE VIEW (tbl_child_archive) — MATCH fields your table uses
+// ARCHIVE VIEW
 // --------------------
 if ($view === 'archive') {
   $where = [];
@@ -91,21 +100,51 @@ if ($view === 'archive') {
     $params[] = $userBarangayId;
   }
 
+  if ($q !== '') {
+    $where[] = "(
+      CONCAT_WS(' ', ca.c_firstname, ca.c_middlename, ca.c_lastname) LIKE ?
+      OR CONCAT_WS(' ', ca.g_firstname, ca.g_middlename, ca.g_lastname) LIKE ?
+      OR COALESCE(ca.purok, '') LIKE ?
+      OR COALESCE(b.barangay_name, '') LIKE ?
+    )";
+    $like = "%{$q}%";
+    array_push($params, $like, $like, $like, $like);
+  }
+
+  if ($sex !== '') {
+    $where[] = "LOWER(COALESCE(ca.sex, '')) = LOWER(?)";
+    $params[] = $sex;
+  }
+
   $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 
-  // total
-  $countSql = "SELECT COUNT(*) FROM tbl_child_archive ca $whereSql";
+  $orderSql = "ORDER BY ca.archived_id DESC";
+  if ($sort === 'name_asc') {
+    $orderSql = "ORDER BY ca.c_lastname ASC, ca.c_firstname ASC, ca.c_middlename ASC";
+  } elseif ($sort === 'name_desc') {
+    $orderSql = "ORDER BY ca.c_lastname DESC, ca.c_firstname DESC, ca.c_middlename DESC";
+  }
+
+  $countSql = "
+    SELECT COUNT(*)
+    FROM tbl_child_archive ca
+    LEFT JOIN tbl_barangay b ON b.barangay_id = ca.barangay_id
+    $whereSql
+  ";
   $st = $pdo->prepare($countSql);
   $st->execute($params);
   $total = (int)$st->fetchColumn();
 
-  // rows (return c_* fields + purok + barangay_name + last_updated)
   $listSql = "
     SELECT
       ca.archived_id,
+      ca.child_seq,
       ca.c_firstname,
       ca.c_middlename,
       ca.c_lastname,
+      ca.g_firstname,
+      ca.g_middlename,
+      ca.g_lastname,
       ca.sex,
       ca.purok,
       b.barangay_name,
@@ -113,7 +152,7 @@ if ($view === 'archive') {
     FROM tbl_child_archive ca
     LEFT JOIN tbl_barangay b ON b.barangay_id = ca.barangay_id
     $whereSql
-    ORDER BY ca.archived_id DESC
+    $orderSql
     LIMIT $limit OFFSET $offset
   ";
   $st = $pdo->prepare($listSql);
@@ -133,8 +172,7 @@ if ($view === 'archive') {
 }
 
 // --------------------
-// ACTIVE LIST (tbl_child_info) + latest measurement date as last_updated
-// For updated/outdated: filter using latest measurement date per child
+// ACTIVE LIST
 // --------------------
 $where = [];
 $params = [];
@@ -144,44 +182,73 @@ if ($role !== 'admin') {
   $params[] = $userBarangayId;
 }
 
-$whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
+if ($q !== '') {
+  $where[] = "(
+    CONCAT_WS(' ', ci.c_firstname, ci.c_middlename, ci.c_lastname) LIKE ?
+    OR CONCAT_WS(' ', ci.g_firstname, ci.g_middlename, ci.g_lastname) LIKE ?
+    OR COALESCE(ci.purok, '') LIKE ?
+    OR COALESCE(b.barangay_name, '') LIKE ?
+  )";
+  $like = "%{$q}%";
+  array_push($params, $like, $like, $like, $like);
+}
 
-// view filter based on latest measurement date
-$viewFilterSql = "";
+if ($sex !== '') {
+  $where[] = "LOWER(COALESCE(ci.sex, '')) = LOWER(?)";
+  $params[] = $sex;
+}
+
+if ($measurement === 'with') {
+  $where[] = "lm.last_measured IS NOT NULL";
+} elseif ($measurement === 'without') {
+  $where[] = "lm.last_measured IS NULL";
+}
+
+// view filter
 if ($view === 'updated') {
-  // this month
-  $viewFilterSql = " AND lm.last_measured >= ? AND lm.last_measured < ? ";
+  $where[] = "lm.last_measured >= ? AND lm.last_measured < ?";
   $params[] = $firstDay;
   $params[] = $nextMonthFirstDay;
 } elseif ($view === 'outdated') {
-  // no measurement or older than this month
-  $viewFilterSql = " AND (lm.last_measured IS NULL OR lm.last_measured < ?) ";
+  $where[] = "(lm.last_measured IS NULL OR lm.last_measured < ?)";
   $params[] = $firstDay;
 }
 
-// total
+$whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
+
+$orderSql = "ORDER BY COALESCE(lm.last_measured, '1900-01-01') DESC, ci.child_seq DESC";
+if ($sort === 'oldest') {
+  $orderSql = "ORDER BY COALESCE(lm.last_measured, '1900-01-01') ASC, ci.child_seq ASC";
+} elseif ($sort === 'name_asc') {
+  $orderSql = "ORDER BY ci.c_lastname ASC, ci.c_firstname ASC, ci.c_middlename ASC";
+} elseif ($sort === 'name_desc') {
+  $orderSql = "ORDER BY ci.c_lastname DESC, ci.c_firstname DESC, ci.c_middlename DESC";
+}
+
 $countSql = "
   SELECT COUNT(*)
   FROM tbl_child_info ci
+  LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
   LEFT JOIN (
     SELECT child_seq, MAX(date_measured) AS last_measured
     FROM tbl_measurement
     GROUP BY child_seq
   ) lm ON lm.child_seq = ci.child_seq
   $whereSql
-  $viewFilterSql
 ";
 $st = $pdo->prepare($countSql);
 $st->execute($params);
 $total = (int)$st->fetchColumn();
 
-// rows
 $listSql = "
   SELECT
     ci.child_seq,
     ci.c_firstname,
     ci.c_middlename,
     ci.c_lastname,
+    ci.g_firstname,
+    ci.g_middlename,
+    ci.g_lastname,
     ci.sex,
     ci.purok,
     b.barangay_name,
@@ -194,8 +261,7 @@ $listSql = "
     GROUP BY child_seq
   ) lm ON lm.child_seq = ci.child_seq
   $whereSql
-  $viewFilterSql
-  ORDER BY COALESCE(lm.last_measured, '1900-01-01') DESC, ci.child_seq DESC
+  $orderSql
   LIMIT $limit OFFSET $offset
 ";
 
