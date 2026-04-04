@@ -40,6 +40,23 @@ function out($code, $payload) {
   exit;
 }
 
+function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable, ?string $targetId, ?string $description): void {
+  try {
+    $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if (strpos($ip, ',') !== false) {
+      $ip = trim(explode(',', $ip)[0]);
+    }
+
+    $st = $pdo->prepare("
+      INSERT INTO tbl_audit_logs (user_id, action, target_table, target_id, description, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $st->execute([$userId, $action, $targetTable, $targetId, $description, $ip !== '' ? $ip : null]);
+  } catch (Throwable $e) {
+    error_log("Audit log failed: " . $e->getMessage());
+  }
+}
+
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
@@ -59,10 +76,12 @@ try {
   $bilateralPitting = trim((string)($data['bilateral_pitting'] ?? 'No'));
 
   if ($childSeq <= 0) {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', null, 'Invalid child_seq');
     out(422, ["message" => "Invalid child_seq"]);
   }
 
   if ($dateMeasured === '') {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Date measured is required');
     out(422, ["message" => "Date measured is required"]);
   }
 
@@ -73,12 +92,13 @@ try {
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
 
     if ($userBarangayId <= 0) {
+      audit_log($pdo, $userId, 'MEASUREMENT_ADD_DENIED', 'tbl_measurement', (string)$childSeq, 'No barangay assigned');
       out(403, ["message" => "No barangay assigned"]);
     }
   }
 
   $checkSql = "
-    SELECT child_seq, barangay_id, sex, date_birth
+    SELECT child_seq, barangay_id, sex, date_birth, c_firstname, c_middlename, c_lastname
     FROM tbl_child_info
     WHERE child_seq = ?
   ";
@@ -95,21 +115,25 @@ try {
   $child = $st->fetch(PDO::FETCH_ASSOC);
 
   if (!$child) {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_DENIED', 'tbl_measurement', (string)$childSeq, 'Child not found or outside barangay');
     out(404, ["message" => "Child not found"]);
   }
 
   if (empty($child['date_birth'])) {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Child birthday missing');
     out(422, ["message" => "Child birthday is required before adding measurement"]);
   }
 
   if ($assessmentMethod === 'Weight + Length/Height') {
     if ($weight === null || $height === null) {
+      audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Weight and height required');
       out(422, ["message" => "Weight and Height/Length are required for this method"]);
     }
   }
 
   if ($assessmentMethod === 'MUAC') {
     if ($muac === null) {
+      audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'MUAC required');
       out(422, ["message" => "MUAC is required for this method"]);
     }
   }
@@ -118,10 +142,12 @@ try {
   if ($height !== null) {
     if ($ageMonthsPreview <= 23) {
       if ($height < 45 || $height > 110) {
+        audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Invalid length for 0-23 months');
         out(422, ["message" => "For 0–23 months, length must be between 45 and 110 cm"]);
       }
     } else {
       if ($height < 65 || $height > 120) {
+        audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Invalid height for 24+ months');
         out(422, ["message" => "For 24+ months, height must be between 65 and 120 cm"]);
       }
     }
@@ -152,6 +178,7 @@ try {
   ");
   $dup->execute([$childSeq, $dateMeasured]);
   if ($dup->fetchColumn()) {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_DUPLICATE', 'tbl_measurement', (string)$childSeq, "Duplicate measurement date {$dateMeasured}");
     out(409, ["message" => "A measurement already exists for this date"]);
   }
 
@@ -204,9 +231,25 @@ try {
     ':bilateral_pitting' => $bilateralPitting
   ]);
 
+  $measureId = (int)$pdo->lastInsertId();
+  $childName = trim(implode(' ', array_filter([
+    $child['c_firstname'] ?? '',
+    $child['c_middlename'] ?? '',
+    $child['c_lastname'] ?? ''
+  ])));
+
+  audit_log(
+    $pdo,
+    $userId,
+    'MEASUREMENT_ADDED',
+    'tbl_measurement',
+    (string)$measureId,
+    "Added measurement for child_seq={$childSeq}" . ($childName !== '' ? " ({$childName})" : '') . " on {$dateMeasured}"
+  );
+
   out(201, [
     "message" => "Measurement added successfully",
-    "measure_id" => (int)$pdo->lastInsertId(),
+    "measure_id" => $measureId,
     "age_months" => $ageMonths,
     "age_days" => $ageDays,
     "weight_status" => $weightStatus,

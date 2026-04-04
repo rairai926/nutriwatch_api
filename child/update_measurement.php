@@ -40,6 +40,23 @@ function out($code, $payload) {
   exit;
 }
 
+function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable, ?string $targetId, ?string $description): void {
+  try {
+    $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if (strpos($ip, ',') !== false) {
+      $ip = trim(explode(',', $ip)[0]);
+    }
+
+    $st = $pdo->prepare("
+      INSERT INTO tbl_audit_logs (user_id, action, target_table, target_id, description, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $st->execute([$userId, $action, $targetTable, $targetId, $description, $ip !== '' ? $ip : null]);
+  } catch (Throwable $e) {
+    error_log("Audit log failed: " . $e->getMessage());
+  }
+}
+
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
@@ -59,10 +76,12 @@ try {
   $bilateralPitting = trim((string)($data['bilateral_pitting'] ?? 'No'));
 
   if ($measureId <= 0) {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', null, 'Invalid measure_id');
     out(422, ["message" => "Invalid measure_id"]);
   }
 
   if ($dateMeasured === '') {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Date measured is required');
     out(422, ["message" => "Date measured is required"]);
   }
 
@@ -73,6 +92,7 @@ try {
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
 
     if ($userBarangayId <= 0) {
+      audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_DENIED', 'tbl_measurement', (string)$measureId, 'No barangay assigned');
       out(403, ["message" => "No barangay assigned"]);
     }
   }
@@ -81,9 +101,16 @@ try {
     SELECT
       m.measure_id,
       m.child_seq,
+      m.date_measured AS old_date_measured,
+      m.weight AS old_weight,
+      m.height AS old_height,
+      m.muac AS old_muac,
       ci.barangay_id,
       ci.sex,
-      ci.date_birth
+      ci.date_birth,
+      ci.c_firstname,
+      ci.c_middlename,
+      ci.c_lastname
     FROM tbl_measurement m
     JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
     WHERE m.measure_id = ?
@@ -94,25 +121,30 @@ try {
   $row = $st->fetch(PDO::FETCH_ASSOC);
 
   if (!$row) {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Measurement not found');
     out(404, ["message" => "Measurement not found"]);
   }
 
   if ($role !== 'admin' && (int)$row['barangay_id'] !== $userBarangayId) {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_DENIED', 'tbl_measurement', (string)$measureId, 'Forbidden outside barangay');
     out(403, ["message" => "Forbidden"]);
   }
 
   if (empty($row['date_birth'])) {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Child birthday missing');
     out(422, ["message" => "Child birthday is required before updating measurement"]);
   }
 
   if ($assessmentMethod === 'Weight + Length/Height') {
     if ($weight === null || $height === null) {
+      audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Weight and height required');
       out(422, ["message" => "Weight and Height/Length are required for this method"]);
     }
   }
 
   if ($assessmentMethod === 'MUAC') {
     if ($muac === null) {
+      audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'MUAC required');
       out(422, ["message" => "MUAC is required for this method"]);
     }
   }
@@ -121,10 +153,12 @@ try {
   if ($height !== null) {
     if ($ageMonthsPreview <= 23) {
       if ($height < 45 || $height > 110) {
+        audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Invalid length for 0-23 months');
         out(422, ["message" => "For 0–23 months, length must be between 45 and 110 cm"]);
       }
     } else {
       if ($height < 65 || $height > 120) {
+        audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Invalid height for 24+ months');
         out(422, ["message" => "For 24+ months, height must be between 65 and 120 cm"]);
       }
     }
@@ -155,6 +189,7 @@ try {
   ");
   $dup->execute([(int)$row['child_seq'], $dateMeasured, $measureId]);
   if ($dup->fetchColumn()) {
+    audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_DUPLICATE', 'tbl_measurement', (string)$measureId, "Duplicate target date {$dateMeasured}");
     out(409, ["message" => "Another measurement already exists for this date"]);
   }
 
@@ -190,6 +225,21 @@ try {
     ':bilateral_pitting' => $bilateralPitting,
     ':measure_id' => $measureId
   ]);
+
+  $childName = trim(implode(' ', array_filter([
+    $row['c_firstname'] ?? '',
+    $row['c_middlename'] ?? '',
+    $row['c_lastname'] ?? ''
+  ])));
+
+  $desc = "Updated measurement for child_seq={$row['child_seq']}";
+  if ($childName !== '') $desc .= " ({$childName})";
+  $desc .= "; date {$row['old_date_measured']} -> {$dateMeasured}";
+  $desc .= "; weight {$row['old_weight']} -> " . ($weight ?? 'null');
+  $desc .= "; height {$row['old_height']} -> " . ($height ?? 'null');
+  $desc .= "; muac {$row['old_muac']} -> " . ($muac ?? 'null');
+
+  audit_log($pdo, $userId, 'MEASUREMENT_UPDATED', 'tbl_measurement', (string)$measureId, $desc);
 
   out(200, [
     "message" => "Measurement updated successfully",
