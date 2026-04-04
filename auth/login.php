@@ -28,6 +28,12 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
   exit;
 }
 
+if (($_SERVER["REQUEST_METHOD"] ?? "") !== "POST") {
+  http_response_code(405);
+  echo json_encode(["message" => "Method not allowed"]);
+  exit;
+}
+
 require_once __DIR__ . "/../vendor/autoload.php";
 require_once __DIR__ . "/../config/db.php";
 
@@ -130,6 +136,30 @@ function reset_fail_count(PDO $pdo, string $username, string $ip): void {
   $stmt->execute([$username, $ip]);
 }
 
+function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable, ?string $targetId, ?string $description): void {
+  try {
+    $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if (strpos($ip, ',') !== false) {
+      $ip = trim(explode(',', $ip)[0]);
+    }
+
+    $stmt = $pdo->prepare("
+      INSERT INTO tbl_audit_logs (user_id, action, target_table, target_id, description, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([
+      $userId,
+      $action,
+      $targetTable,
+      $targetId,
+      $description,
+      $ip !== '' ? $ip : null
+    ]);
+  } catch (Throwable $e) {
+    error_log("Audit log failed: " . $e->getMessage());
+  }
+}
+
 // --------------------
 // INPUT
 // --------------------
@@ -140,6 +170,7 @@ $captchaToken = trim($data["captchaToken"] ?? "");
 $ip = $_SERVER["REMOTE_ADDR"] ?? "unknown";
 
 if ($username === "" || $password === "") {
+  audit_log($pdo, null, 'LOGIN_FAILED', 'tbl_users', null, 'Missing credentials' . ($username !== '' ? " for username={$username}" : ''));
   http_response_code(400);
   echo json_encode(["message" => "Missing credentials"]);
   exit;
@@ -175,6 +206,7 @@ $captchaRequired = !empty($_SESSION["captcha_required"]);
 // --------------------
 if ($captchaRequired) {
   if ($captchaToken === "") {
+    audit_log($pdo, null, 'LOGIN_CAPTCHA_REQUIRED', 'tbl_users', null, "CAPTCHA required for username={$username}");
     http_response_code(403);
     echo json_encode([
       "message" => "CAPTCHA required. Please verify first.",
@@ -184,6 +216,7 @@ if ($captchaRequired) {
   }
 
   if (!verify_turnstile($captchaToken)) {
+    audit_log($pdo, null, 'LOGIN_CAPTCHA_FAILED', 'tbl_users', null, "CAPTCHA verification failed for username={$username}");
     http_response_code(403);
     echo json_encode([
       "message" => "CAPTCHA verification failed. Please try again.",
@@ -219,6 +252,8 @@ if (!$user) {
   $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
   $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
 
+  audit_log($pdo, null, 'LOGIN_FAILED', 'tbl_users', null, "Invalid username: {$username}");
+
   http_response_code(401);
   echo json_encode([
     "message" => "Invalid username or password",
@@ -230,6 +265,7 @@ if (!$user) {
 // active = allowed
 // inactive = blocked/disabled
 if (($user["status"] ?? "") !== "active") {
+  audit_log($pdo, (int)$user["users_id"], 'LOGIN_DENIED', 'tbl_users', (string)$user["users_id"], 'Account disabled/inactive');
   http_response_code(403);
   echo json_encode([
     "message" => "Your account has been disabled. Please contact the administrator."
@@ -242,6 +278,8 @@ if (!password_verify($password, $user["password"])) {
 
   $newFailCount = get_fail_count($pdo, $username, $ip, $FAIL_RESET_MINUTES);
   $captchaNow = ($newFailCount >= $FAIL_CAPTCHA_THRESHOLD);
+
+  audit_log($pdo, (int)$user["users_id"], 'LOGIN_FAILED', 'tbl_users', (string)$user["users_id"], 'Invalid password');
 
   http_response_code(401);
   echo json_encode([
@@ -273,6 +311,15 @@ if ($mustChangePassword && empty($passwordChangedAt) && $createdAtTs) {
     ");
     $disableStmt->execute([$user["users_id"]]);
 
+    audit_log(
+      $pdo,
+      (int)$user["users_id"],
+      'LOGIN_AUTO_DISABLED',
+      'tbl_users',
+      (string)$user["users_id"],
+      'Account auto-disabled for not changing initial password within 30 days'
+    );
+
     http_response_code(403);
     echo json_encode([
       "message" => "Your account has been disabled because you did not change your initial password within 30 days."
@@ -302,6 +349,15 @@ $jwt = JWT::encode($payload, $secretKey, "HS256");
 
 // Clear captcha session state after successful login
 unset($_SESSION["captcha_decided"], $_SESSION["captcha_required"], $_SESSION["captcha_decided_at"]);
+
+audit_log(
+  $pdo,
+  (int)$user["users_id"],
+  'LOGIN_SUCCESS',
+  'tbl_users',
+  (string)$user["users_id"],
+  "Successful login for username={$user['username']}, role={$user['role']}"
+);
 
 echo json_encode([
   "token" => $jwt,
