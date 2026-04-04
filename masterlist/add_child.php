@@ -43,6 +43,30 @@ function out($code, $payload) {
   exit;
 }
 
+function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable, ?string $targetId, ?string $description): void {
+  try {
+    $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if (strpos($ip, ',') !== false) {
+      $ip = trim(explode(',', $ip)[0]);
+    }
+
+    $st = $pdo->prepare("
+      INSERT INTO tbl_audit_logs (user_id, action, target_table, target_id, description, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $st->execute([
+      $userId,
+      $action,
+      $targetTable,
+      $targetId,
+      $description,
+      $ip !== '' ? $ip : null
+    ]);
+  } catch (Throwable $e) {
+    error_log("Audit log failed: " . $e->getMessage());
+  }
+}
+
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
@@ -73,6 +97,7 @@ try {
   $disability = trim((string)($data['disability'] ?? ''));
 
   if ($c_lastname === '' || $c_firstname === '') {
+    audit_log($pdo, $userId, 'CHILD_ADD_FAILED', 'tbl_child_info', null, 'Missing child first or last name');
     out(422, ["ok" => false, "message" => "Child first name and last name are required"]);
   }
 
@@ -80,6 +105,7 @@ try {
   if (in_array($sexLower, ['m', 'male', 'boy', 'boys'], true)) $sex = 'Male';
   if (in_array($sexLower, ['f', 'female', 'girl', 'girls'], true)) $sex = 'Female';
   if (!in_array($sex, ['Male', 'Female'], true)) {
+    audit_log($pdo, $userId, 'CHILD_ADD_FAILED', 'tbl_child_info', null, 'Invalid sex value');
     out(422, ["ok" => false, "message" => "Sex must be Male or Female"]);
   }
 
@@ -91,6 +117,7 @@ try {
   if ($role === 'admin') {
     $barangay_id = (int)($data['barangay_id'] ?? 0);
     if ($barangay_id <= 0) {
+      audit_log($pdo, $userId, 'CHILD_ADD_FAILED', 'tbl_child_info', null, 'Admin missing barangay_id');
       out(422, ["ok" => false, "message" => "Admin must provide barangay_id"]);
     }
   } else {
@@ -99,18 +126,18 @@ try {
     $barangay_id = (int)($st->fetchColumn() ?: 0);
 
     if ($barangay_id <= 0) {
+      audit_log($pdo, $userId, 'CHILD_ADD_DENIED', 'tbl_child_info', null, 'No barangay assigned');
       out(403, ["ok" => false, "message" => "No barangay assigned"]);
     }
   }
 
   if ($date_birth !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_birth)) {
+    audit_log($pdo, $userId, 'CHILD_ADD_FAILED', 'tbl_child_info', null, 'Invalid date_birth format');
     out(422, ["ok" => false, "message" => "date_birth must be YYYY-MM-DD"]);
   }
 
   // --------------------
   // Duplicate detection
-  // Rule: same barangay + same first/last name + same birth date
-  // Soft expansion: same barangay + same first/last name even if birth date missing
   // --------------------
   $dupSql = "
     SELECT
@@ -148,6 +175,15 @@ try {
   $duplicates = $dupSt->fetchAll(PDO::FETCH_ASSOC);
 
   if (!$forceSave && !empty($duplicates)) {
+    audit_log(
+      $pdo,
+      $userId,
+      'CHILD_ADD_DUPLICATE_WARNING',
+      'tbl_child_info',
+      null,
+      "Duplicate warning for {$c_firstname} {$c_lastname}" . ($date_birth !== '' ? " ({$date_birth})" : '')
+    );
+
     out(409, [
       "ok" => false,
       "message" => "Possible duplicate child record found.",
@@ -207,11 +243,21 @@ try {
     ':user_id' => $userId
   ]);
 
+  $newChildSeq = (int)$pdo->lastInsertId();
+
+  $desc = "Added child {$c_firstname} {$c_lastname}";
+  if ($date_birth !== '') $desc .= " (DOB: {$date_birth})";
+  $desc .= " in barangay_id={$barangay_id}";
+  if ($forceSave && !empty($duplicates)) $desc .= " using force_save after duplicate warning";
+
+  audit_log($pdo, $userId, 'CHILD_ADDED', 'tbl_child_info', (string)$newChildSeq, $desc);
+
   out(201, [
     "ok" => true,
     "message" => "Child added",
-    "child_seq" => (int)$pdo->lastInsertId()
+    "child_seq" => $newChildSeq
   ]);
 } catch (Throwable $e) {
+  error_log("add_child.php error: " . $e->getMessage());
   out(500, ["ok" => false, "message" => "Server error", "error" => $e->getMessage()]);
 }
