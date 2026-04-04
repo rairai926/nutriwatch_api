@@ -51,6 +51,30 @@ function json_out($code, $payload) {
   exit;
 }
 
+function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable, ?string $targetId, ?string $description): void {
+  try {
+    $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if (strpos($ip, ',') !== false) {
+      $ip = trim(explode(',', $ip)[0]);
+    }
+
+    $st = $pdo->prepare("
+      INSERT INTO tbl_audit_logs (user_id, action, target_table, target_id, description, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $st->execute([
+      $userId,
+      $action,
+      $targetTable,
+      $targetId,
+      $description,
+      $ip !== '' ? $ip : null
+    ]);
+  } catch (Throwable $e) {
+    error_log("Audit log failed: " . $e->getMessage());
+  }
+}
+
 function clean_person_name($last, $first, $middle = '') {
   $last = trim((string)$last);
   $first = trim((string)$first);
@@ -111,14 +135,17 @@ try {
   $month = (int)($_GET['month'] ?? 0);
 
   if ($barangayId <= 0) {
+    audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', null, 'Invalid barangay_id');
     json_out(422, ["ok" => false, "message" => "Invalid barangay"]);
   }
 
   if ($year < 2000 || $year > 2100) {
+    audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', (string)$barangayId, 'Invalid year');
     json_out(422, ["ok" => false, "message" => "Invalid year"]);
   }
 
   if ($month < 1 || $month > 12) {
+    audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', (string)$barangayId, 'Invalid month');
     json_out(422, ["ok" => false, "message" => "Invalid month"]);
   }
 
@@ -133,10 +160,12 @@ try {
     $userBarangayId = (int)($userBarangayStmt->fetchColumn() ?: 0);
 
     if ($userBarangayId <= 0) {
+      audit_log($pdo, $userId, 'REPORT_EXPORT_DENIED', 'opt_plus_form_1a', (string)$barangayId, 'No barangay assigned');
       json_out(403, ["ok" => false, "message" => "No barangay assigned"]);
     }
 
     if ($userBarangayId !== $barangayId) {
+      audit_log($pdo, $userId, 'REPORT_EXPORT_DENIED', 'opt_plus_form_1a', (string)$barangayId, 'User attempted access to another barangay report');
       json_out(403, ["ok" => false, "message" => "You are not allowed to access this barangay report"]);
     }
   }
@@ -151,6 +180,7 @@ try {
   $barangay = $barangayStmt->fetch(PDO::FETCH_ASSOC);
 
   if (!$barangay) {
+    audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', (string)$barangayId, 'Barangay not found');
     json_out(404, ["ok" => false, "message" => "Barangay not found"]);
   }
 
@@ -204,6 +234,7 @@ try {
 
   $templatePath = __DIR__ . "/templates/opt_1a_single.xlsx";
   if (!file_exists($templatePath)) {
+    audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', (string)$barangayId, 'Excel template not found');
     json_out(500, ["ok" => false, "message" => "Excel template not found"]);
   }
 
@@ -291,6 +322,15 @@ try {
     $month
   );
 
+  audit_log(
+    $pdo,
+    $userId,
+    'REPORT_EXPORTED',
+    'opt_plus_form_1a',
+    (string)$barangayId,
+    "Exported OPT Plus Form 1A for barangay={$barangay['barangay_name']} ({$barangayId}), period={$year}-" . str_pad((string)$month, 2, '0', STR_PAD_LEFT) . ", rows={$totalRows}"
+  );
+
   if (ob_get_length()) {
     ob_end_clean();
   }
@@ -304,6 +344,17 @@ try {
   $writer->save('php://output');
   exit;
 } catch (Throwable $e) {
+  if (isset($pdo) && isset($userId)) {
+    audit_log(
+      $pdo,
+      $userId,
+      'REPORT_EXPORT_FAILED',
+      'opt_plus_form_1a',
+      isset($barangayId) ? (string)$barangayId : null,
+      $e->getMessage()
+    );
+  }
+
   json_out(500, [
     "ok" => false,
     "message" => "Server error",
