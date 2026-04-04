@@ -40,6 +40,9 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
+// --------------------
+// Helpers
+// --------------------
 function out($code, $payload) {
   http_response_code($code);
   echo json_encode($payload);
@@ -93,6 +96,9 @@ function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable,
   }
 }
 
+// --------------------
+// Get token
+// --------------------
 $token = get_bearer_token();
 
 if ($token === '') {
@@ -100,7 +106,13 @@ if ($token === '') {
   out(401, ["message" => "Token missing"]);
 }
 
+// detect logout type
+$reason = $_GET['reason'] ?? 'manual';
+
 try {
+  // --------------------
+  // Decode JWT
+  // --------------------
   $secretKey = getenv("JWT_SECRET") ?: "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#";
   $decoded = JWT::decode($token, new Key($secretKey, 'HS256'));
 
@@ -112,7 +124,9 @@ try {
     out(401, ["message" => "Invalid token"]);
   }
 
-  // Prevent duplicate blacklist errors if token already logged out
+  // --------------------
+  // Prevent duplicate blacklist
+  // --------------------
   $check = $pdo->prepare("SELECT COUNT(*) FROM jwt_blacklist WHERE token = ?");
   $check->execute([$token]);
   $alreadyBlacklisted = (int)$check->fetchColumn() > 0;
@@ -122,8 +136,18 @@ try {
       INSERT INTO jwt_blacklist (token, expires_at)
       VALUES (?, ?)
     ");
-    $stmt->execute([$token, date('Y-m-d H:i:s', $exp)]);
+    $stmt->execute([
+      $token,
+      date('Y-m-d H:i:s', $exp) // convert timestamp to DATETIME
+    ]);
   }
+
+  // --------------------
+  // Audit Log
+  // --------------------
+  $description = $reason === 'auto'
+    ? 'Auto logout due to token expiry'
+    : 'Manual logout by user';
 
   audit_log(
     $pdo,
@@ -131,11 +155,22 @@ try {
     'LOGOUT_SUCCESS',
     'jwt_blacklist',
     $userId !== null ? (string)$userId : null,
-    $alreadyBlacklisted ? 'Logout requested; token already blacklisted' : 'Logged out successfully and token blacklisted'
+    $alreadyBlacklisted
+      ? $description . ' (token already blacklisted)'
+      : $description
   );
 
   echo json_encode(["message" => "Logged out successfully"]);
+
 } catch (Throwable $e) {
-  audit_log($pdo, null, 'LOGOUT_FAILED', 'jwt_blacklist', null, 'Invalid or undecodable token: ' . $e->getMessage());
+  audit_log(
+    $pdo,
+    null,
+    'LOGOUT_FAILED',
+    'jwt_blacklist',
+    null,
+    'Invalid or undecodable token: ' . $e->getMessage()
+  );
+
   out(401, ["message" => "Invalid token"]);
 }
