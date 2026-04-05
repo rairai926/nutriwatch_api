@@ -16,7 +16,6 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
   header("Access-Control-Allow-Origin: $origin");
   header("Access-Control-Allow-Credentials: true");
 }
-
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 
@@ -61,41 +60,40 @@ try {
     }
   }
 
-  $where = ["ci.child_seq = ?"];
+  $sql = "
+    SELECT
+      c.child_seq,
+      c.barangay_id,
+      c.c_firstname,
+      c.c_middlename,
+      c.c_lastname,
+      c.g_firstname,
+      c.g_middlename,
+      c.g_lastname,
+      c.purok,
+      c.sex,
+      c.date_birth,
+      c.ip_group,
+      c.disability,
+      c.child_photo_type,
+      CASE
+        WHEN c.child_photo IS NOT NULL AND OCTET_LENGTH(c.child_photo) > 0 THEN 1
+        ELSE 0
+      END AS has_photo,
+      b.barangay_name
+    FROM tbl_child_info c
+    LEFT JOIN tbl_barangay b ON b.barangay_id = c.barangay_id
+    WHERE c.child_seq = ?
+  ";
+
   $params = [$childSeq];
 
   if ($role !== 'admin') {
-    $where[] = "ci.barangay_id = ?";
+    $sql .= " AND c.barangay_id = ?";
     $params[] = $userBarangayId;
   }
 
-  $whereSql = "WHERE " . implode(" AND ", $where);
-
-  $sql = "
-    SELECT
-      ci.child_seq,
-      ci.province_id,
-      ci.city_id,
-      ci.barangay_id,
-      ci.purok,
-      ci.g_lastname,
-      ci.g_firstname,
-      ci.g_middlename,
-      ci.c_lastname,
-      ci.c_firstname,
-      ci.c_middlename,
-      ci.ip_group,
-      ci.sex,
-      ci.date_birth,
-      ci.disability,
-      ci.child_photo,
-      ci.user_id,
-      b.barangay_name
-    FROM tbl_child_info ci
-    LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
-    $whereSql
-    LIMIT 1
-  ";
+  $sql .= " LIMIT 1";
 
   $st = $pdo->prepare($sql);
   $st->execute($params);
@@ -109,18 +107,20 @@ try {
     SELECT
       m.measure_id,
       m.child_seq,
-      m.user_id,
       m.date_measured,
+      m.age_months,
+      m.age_days,
       m.weight,
       m.height,
       m.muac,
-      m.age_months,
+      m.bilateral_pitting,
       m.weight_status,
       m.height_status,
       m.lt_status,
       m.muac_status,
-      m.bilateral_pitting
-    FROM tbl_measurement m
+      m.encoded_by,
+      m.encoded_by_role
+    FROM tbl_child_measurements m
     WHERE m.child_seq = ?
     ORDER BY m.date_measured DESC, m.measure_id DESC
     LIMIT 1
@@ -128,21 +128,17 @@ try {
 
   $st = $pdo->prepare($latestSql);
   $st->execute([$childSeq]);
-  $latest = $st->fetch(PDO::FETCH_ASSOC);
+  $latest = $st->fetch(PDO::FETCH_ASSOC) ?: null;
 
-  // if no measurement yet, return null instead of false
-  if (!$latest) {
-    $latest = null;
-  } else {
-    if (!empty($child['date_birth']) && !empty($latest['date_measured'])) {
-      $birth = new DateTime($child['date_birth']);
-      $measured = new DateTime($latest['date_measured']);
-      $diff = $birth->diff($measured);
-      $latest['age_days'] = (int)$diff->days;
-    } else {
-      $latest['age_days'] = null;
-    }
+  $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+  $photoUrl = null;
+
+  if ((int)($child['has_photo'] ?? 0) === 1) {
+    $photoUrl = $basePath . "/get_child_photo.php?child_seq=" . (int)$child['child_seq'];
   }
+
+  $child['has_photo'] = (int)($child['has_photo'] ?? 0);
+  $child['photo_url'] = $photoUrl;
 
   out(200, [
     "child" => $child,
