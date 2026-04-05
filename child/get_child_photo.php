@@ -46,7 +46,7 @@ try {
   $st->execute($params);
   $row = $st->fetch(PDO::FETCH_ASSOC);
 
-  if (!$row || empty($row['child_photo'])) {
+  if (!$row || $row['child_photo'] === null || strlen($row['child_photo']) === 0) {
     http_response_code(404);
     exit("No photo found");
   }
@@ -57,10 +57,11 @@ try {
   }
 
   header("Content-Type: " . $contentType);
+  header("Content-Length: " . strlen($row['child_photo']));
   header("Cache-Control: private, max-age=86400");
   echo $row['child_photo'];
   exit;
 } catch (Throwable $e) {
   http_response_code(500);
-  exit("Server error");
+  exit("Server error: " . $e->getMessage());
 }
