@@ -259,12 +259,14 @@ try {
     SELECT 
       b.barangay_id,
       b.barangay_name,
-      c.city_name,
-      p.province_name
+      MAX(c.city_name) AS city_name,
+      MAX(p.province_name) AS province_name
     FROM tbl_barangay b
-    LEFT JOIN tbl_city c ON c.city_id = b.city_id
-    LEFT JOIN tbl_province p ON p.province_id = c.province_id
+    LEFT JOIN tbl_child_info ci ON ci.barangay_id = b.barangay_id
+    LEFT JOIN tbl_city c ON c.city_id = ci.city_id
+    LEFT JOIN tbl_province p ON p.province_id = ci.province_id
     WHERE b.barangay_id = ?
+    GROUP BY b.barangay_id, b.barangay_name
     LIMIT 1
   ");
   $barangayStmt->execute([$barangayId]);
@@ -430,8 +432,10 @@ try {
     }
 
     $hasNoParentOrAddress =
-      trim((string)($row['g_lastname'] ?? '')) === '' &&
-      trim((string)($row['g_firstname'] ?? '')) === '' ||
+      (
+        trim((string)($row['g_lastname'] ?? '')) === '' &&
+        trim((string)($row['g_firstname'] ?? '')) === ''
+      ) ||
       trim((string)($row['purok'] ?? '')) === '';
 
     if ($hasNoParentOrAddress) {
@@ -501,16 +505,18 @@ try {
   $sheet = $spreadsheet->getActiveSheet();
   $sheet->setTitle('OPT Plus Form B');
 
-  // Header info
-  $sheet->setCellValue('B10', $barangay['barangay_name'] ?? '');
-  $sheet->setCellValue('B11', $barangay['city_name'] ?? '');
-  $sheet->setCellValue('H9', $barangay['province_name'] ?? '');
-  $sheet->setCellValue('Q10', 'DOH - EB 2025');
+  $cityName = $barangay['city_name'] ?? '';
+  $provinceName = $barangay['province_name'] ?? '';
 
-  // You can replace these if you already have actual population values in another table
-  $sheet->setCellValue('H10', $totalChildren);   // Total Popn Barangay (placeholder if no table yet)
-  $sheet->setCellValue('H11', $totalChildren);   // Estimated Popn of Children 0-59 mos
-  $sheet->setCellValue('N11', max($totalChildren - $wfa['normal']['0_5']['total'], 0)); // placeholder if needed
+  $sheet->setCellValue('B10', $barangay['barangay_name'] ?? '');
+  $sheet->setCellValue('B11', $cityName);
+  $sheet->setCellValue('H9', $provinceName);
+  $sheet->setCellValue('Q10', 'DOH - EB 2025');
+  $sheet->setCellValue('Q11', month_name_from_number($month) . ' ' . $year);
+
+  $sheet->setCellValue('H10', $totalChildren);
+  $sheet->setCellValue('H11', $totalChildren);
+  $sheet->setCellValue('N11', $totalChildren > 0 ? $totalChildren : 0);
 
   $sheet->setCellValue('Q9', prevalence(sum_status_total($wfa, 'muw') + sum_status_total($wfa, 'suw'), max($totalWfaMeasured, 1)));
   $sheet->setCellValue('Q12', prevalence(sum_status_total($hfa, 'mst') + sum_status_total($hfa, 'sst'), max($totalHfaMeasured, 1)));
@@ -518,7 +524,6 @@ try {
   $sheet->setCellValue('V10', $totalChildren);
   $sheet->setCellValue('V9', $totalChildren);
 
-  // Totals row
   $sheet->setCellValue('D14', $totalBoys);
   $sheet->setCellValue('G14', $totalGirls);
   $sheet->setCellValue('J14', $totalMuacMeasured);
@@ -582,12 +587,11 @@ try {
     $total0to23 = sum_status_0_23($matrix, $status);
 
     $sheet->setCellValue('T' . $excelRow, $totalAll);
-    $sheet->setCellValue('U' . $excelRow, prevalence($totalAll, $totalChildren));
+    $sheet->setCellValue('U' . $excelRow, prevalence($totalAll, max($totalChildren, 1)));
     $sheet->setCellValue('V' . $excelRow, $total0to23);
     $sheet->setCellValue('W' . $excelRow, prevalence($total0to23, max($children0to23, 1)));
   }
 
-  // Total WFA row
   foreach ($ageCols as $ageKey => $cols) {
     [$boyCol, $girlCol, $totalCol] = $cols;
 
@@ -611,7 +615,6 @@ try {
     $sheet->setCellValue($totalCol . '34', $total);
   }
 
-  // Summary sections
   $sheet->setCellValue('H36', $wastedOrStunted0to59);
   $sheet->setCellValue('H37', $wastedOrStunted24to59);
   $sheet->setCellValue('H38', $overweightOrObese0to59);
