@@ -16,6 +16,7 @@ if ($origin && in_array($origin, $allowedOrigins, true)) {
   header("Access-Control-Allow-Origin: $origin");
   header("Access-Control-Allow-Credentials: true");
 }
+
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 
@@ -84,8 +85,8 @@ try {
     out(422, ["message" => "Invalid upload"]);
   }
 
-  if ($_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
-    out(422, ["message" => "Upload failed with error code " . $_FILES['photo']['error']]);
+  if (($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+    out(422, ["message" => "Upload failed with error code " . (int)$_FILES['photo']['error']]);
   }
 
   $allowedMime = [
@@ -103,7 +104,8 @@ try {
   }
 
   $fileSize = (int)($_FILES['photo']['size'] ?? 0);
-  $maxSize = 5 * 1024 * 1024; // 5MB
+  $maxSize = 5 * 1024 * 1024;
+
   if ($fileSize <= 0 || $fileSize > $maxSize) {
     out(422, ["message" => "Image must be greater than 0 bytes and not more than 5MB."]);
   }
@@ -113,7 +115,7 @@ try {
     out(500, ["message" => "Failed to read uploaded image"]);
   }
 
-  $sql = "UPDATE tbl_child_info 
+  $sql = "UPDATE tbl_child_info
           SET child_photo = ?, child_photo_type = ?
           WHERE child_seq = ?";
   $st = $pdo->prepare($sql);
