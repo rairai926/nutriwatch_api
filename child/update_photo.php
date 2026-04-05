@@ -51,9 +51,10 @@ try {
 
   $userBarangayId = 0;
   if ($role !== 'admin') {
-    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
     $st->execute([$userId]);
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
+
     if ($userBarangayId <= 0) {
       out(403, ["message" => "No barangay assigned"]);
     }
@@ -75,34 +76,56 @@ try {
     out(404, ["message" => "Child not found"]);
   }
 
-  if (empty($_FILES['photo']['name'])) {
+  if (empty($_FILES['photo']['name']) || !isset($_FILES['photo']['tmp_name'])) {
     out(422, ["message" => "No photo uploaded"]);
   }
 
-  $dir = __DIR__ . '/../uploads/children/';
-  if (!is_dir($dir)) mkdir($dir, 0777, true);
-
-  $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-  $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-  if (!in_array($ext, $allowed, true)) {
-    out(422, ["message" => "Invalid image type"]);
+  if (!is_uploaded_file($_FILES['photo']['tmp_name'])) {
+    out(422, ["message" => "Invalid upload"]);
   }
 
-  $filename = 'child_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-  $target = $dir . $filename;
-
-  if (!move_uploaded_file($_FILES['photo']['tmp_name'], $target)) {
-    out(500, ["message" => "Failed to upload image"]);
+  if ($_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
+    out(422, ["message" => "Upload failed with error code " . $_FILES['photo']['error']]);
   }
 
-  $path = 'uploads/children/' . $filename;
+  $allowedMime = [
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ];
 
-  $st = $pdo->prepare("UPDATE tbl_child_info SET child_photo = ? WHERE child_seq = ?");
-  $st->execute([$path, $childSeq]);
+  $finfo = finfo_open(FILEINFO_MIME_TYPE);
+  $mimeType = finfo_file($finfo, $_FILES['photo']['tmp_name']);
+  finfo_close($finfo);
+
+  if (!in_array($mimeType, $allowedMime, true)) {
+    out(422, ["message" => "Invalid image type. Only JPG, PNG, and WEBP are allowed."]);
+  }
+
+  $fileSize = (int)($_FILES['photo']['size'] ?? 0);
+  $maxSize = 5 * 1024 * 1024; // 5MB
+  if ($fileSize <= 0 || $fileSize > $maxSize) {
+    out(422, ["message" => "Image must be greater than 0 bytes and not more than 5MB."]);
+  }
+
+  $imageData = file_get_contents($_FILES['photo']['tmp_name']);
+  if ($imageData === false) {
+    out(500, ["message" => "Failed to read uploaded image"]);
+  }
+
+  $sql = "UPDATE tbl_child_info 
+          SET child_photo = ?, child_photo_type = ?
+          WHERE child_seq = ?";
+  $st = $pdo->prepare($sql);
+  $st->bindParam(1, $imageData, PDO::PARAM_LOB);
+  $st->bindParam(2, $mimeType, PDO::PARAM_STR);
+  $st->bindParam(3, $childSeq, PDO::PARAM_INT);
+  $st->execute();
 
   out(200, [
-    "message" => "Photo updated",
-    "child_photo" => $path
+    "message" => "Photo updated successfully",
+    "child_seq" => $childSeq,
+    "child_photo_type" => $mimeType
   ]);
 } catch (Throwable $e) {
   out(500, [
