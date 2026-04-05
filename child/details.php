@@ -88,8 +88,12 @@ try {
       ci.sex,
       ci.date_birth,
       ci.disability,
-      ci.child_photo,
       ci.user_id,
+      ci.child_photo_type,
+      CASE
+        WHEN ci.child_photo IS NOT NULL AND OCTET_LENGTH(ci.child_photo) > 0 THEN 1
+        ELSE 0
+      END AS has_photo,
       b.barangay_name
     FROM tbl_child_info ci
     LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
@@ -130,7 +134,6 @@ try {
   $st->execute([$childSeq]);
   $latest = $st->fetch(PDO::FETCH_ASSOC);
 
-  // if no measurement yet, return null instead of false
   if (!$latest) {
     $latest = null;
   } else {
@@ -143,6 +146,11 @@ try {
       $latest['age_days'] = null;
     }
   }
+
+  $child['has_photo'] = (int)($child['has_photo'] ?? 0);
+  $child['photo_url'] = $child['has_photo']
+    ? "/child/get_child_photo.php?child_seq=" . (int)$child['child_seq']
+    : null;
 
   out(200, [
     "child" => $child,
