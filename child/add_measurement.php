@@ -85,6 +85,12 @@ try {
     out(422, ["message" => "Date measured is required"]);
   }
 
+  $dateObj = DateTime::createFromFormat('Y-m-d', $dateMeasured);
+  if (!$dateObj || $dateObj->format('Y-m-d') !== $dateMeasured) {
+    audit_log($pdo, $userId, 'MEASUREMENT_ADD_FAILED', 'tbl_measurement', (string)$childSeq, 'Invalid date format');
+    out(422, ["message" => "Invalid date_measured format. Use YYYY-MM-DD"]);
+  }
+
   $userBarangayId = 0;
   if ($role !== 'admin') {
     $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
@@ -170,16 +176,42 @@ try {
   $ltStatus = $statuses['lt_status'];
   $muacStatus = $statuses['muac_status'];
 
-  $dup = $pdo->prepare("
-    SELECT measure_id
+  // Block new measurement unless at least 1 month has passed from the latest measurement
+  $lastMeasurement = $pdo->prepare("
+    SELECT measure_id, date_measured
     FROM tbl_measurement
-    WHERE child_seq = ? AND date_measured = ?
+    WHERE child_seq = ?
+    ORDER BY date_measured DESC, measure_id DESC
     LIMIT 1
   ");
-  $dup->execute([$childSeq, $dateMeasured]);
-  if ($dup->fetchColumn()) {
-    audit_log($pdo, $userId, 'MEASUREMENT_ADD_DUPLICATE', 'tbl_measurement', (string)$childSeq, "Duplicate measurement date {$dateMeasured}");
-    out(409, ["message" => "A measurement already exists for this date"]);
+  $lastMeasurement->execute([$childSeq]);
+  $lastRow = $lastMeasurement->fetch(PDO::FETCH_ASSOC);
+
+  if ($lastRow) {
+    $lastDateObj = DateTime::createFromFormat('Y-m-d', $lastRow['date_measured']);
+
+    if ($lastDateObj) {
+      $allowedDateObj = clone $lastDateObj;
+      $allowedDateObj->modify('+1 month');
+
+      if ($dateObj < $allowedDateObj) {
+        $lastDate = $lastDateObj->format('Y-m-d');
+        $allowedDate = $allowedDateObj->format('Y-m-d');
+
+        audit_log(
+          $pdo,
+          $userId,
+          'MEASUREMENT_ADD_BLOCKED',
+          'tbl_measurement',
+          (string)$childSeq,
+          "Measurement too soon. Last: {$lastDate}, Next allowed: {$allowedDate}"
+        );
+
+        out(409, [
+          "message" => "A new measurement can only be added on or after {$allowedDate}"
+        ]);
+      }
+    }
   }
 
   $sql = "
