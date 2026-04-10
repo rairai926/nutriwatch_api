@@ -125,6 +125,26 @@ function safe_date($value) {
   return date('m/d/Y', $ts);
 }
 
+function mark_measurements_as_exported(PDO $pdo, array $measureIds): int {
+  $measureIds = array_values(array_unique(array_filter(array_map('intval', $measureIds))));
+  if (empty($measureIds)) return 0;
+
+  $placeholders = implode(',', array_fill(0, count($measureIds), '?'));
+
+  $sql = "
+    UPDATE tbl_measurement
+    SET
+      is_exported_excel = 1,
+      excel_exported_at = COALESCE(excel_exported_at, NOW())
+    WHERE measure_id IN ($placeholders)
+  ";
+
+  $st = $pdo->prepare($sql);
+  $st->execute($measureIds);
+
+  return $st->rowCount();
+}
+
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
@@ -232,6 +252,11 @@ try {
   $stmt->execute([$startDate, $nextMonthDate, $barangayId]);
   $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+  $measureIds = array_values(array_filter(array_map(
+  fn($r) => isset($r['measure_id']) ? (int)$r['measure_id'] : 0,
+  $rows
+  )));
+
   $templatePath = __DIR__ . "/templates/opt_1a_single.xlsx";
   if (!file_exists($templatePath)) {
     audit_log($pdo, $userId, 'REPORT_EXPORT_FAILED', 'opt_plus_form_1a', (string)$barangayId, 'Excel template not found');
@@ -316,33 +341,38 @@ try {
   }
 
   $filename = sprintf(
-    'OPT_Plus_Form_1A_%s_%04d_%02d.xlsx',
-    preg_replace('/[^A-Za-z0-9_\-]/', '_', $barangay['barangay_name']),
-    $year,
-    $month
-  );
+  'OPT_Plus_Form_1A_%s_%04d_%02d.xlsx',
+  preg_replace('/[^A-Za-z0-9_\-]/', '_', $barangay['barangay_name']),
+  $year,
+  $month
+    );
 
-  audit_log(
-    $pdo,
-    $userId,
-    'REPORT_EXPORTED',
-    'opt_plus_form_1a',
-    (string)$barangayId,
-    "Exported OPT Plus Form 1A for barangay={$barangay['barangay_name']} ({$barangayId}), period={$year}-" . str_pad((string)$month, 2, '0', STR_PAD_LEFT) . ", rows={$totalRows}"
-  );
+    $exportedCount = mark_measurements_as_exported($pdo, $measureIds);
 
-  if (ob_get_length()) {
-    ob_end_clean();
-  }
+    audit_log(
+      $pdo,
+      $userId,
+      'REPORT_EXPORTED',
+      'opt_plus_form_1a',
+      (string)$barangayId,
+      "Exported OPT Plus Form 1A for barangay={$barangay['barangay_name']} ({$barangayId}), period={$year}-" .
+      str_pad((string)$month, 2, '0', STR_PAD_LEFT) .
+      ", rows={$totalRows}, measurements_marked={$exportedCount}"
+    );
 
-  header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  header('Content-Disposition: attachment; filename="' . $filename . '"');
-  header('Cache-Control: max-age=0');
-  header('Pragma: public');
+    if (ob_get_length()) {
+      ob_end_clean();
+    }
 
-  $writer = new Xlsx($spreadsheet);
-  $writer->save('php://output');
-  exit;
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: max-age=0');
+    header('Pragma: public');
+
+    $writer = new Xlsx($spreadsheet);
+    $writer->save('php://output');
+    exit;
+
 } catch (Throwable $e) {
   if (isset($pdo) && isset($userId)) {
     audit_log(
