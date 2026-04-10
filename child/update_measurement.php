@@ -1,34 +1,4 @@
 <?php
-ob_start();
-session_start();
-
-header("Content-Type: application/json; charset=utf-8");
-
-$allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://nutriwatch.com",
-  "http://192.168.1.36:3000"
-];
-
-$origin = $_SERVER["HTTP_ORIGIN"] ?? "";
-if ($origin && in_array($origin, $allowedOrigins, true)) {
-  header("Access-Control-Allow-Origin: $origin");
-  header("Access-Control-Allow-Credentials: true");
-}
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
-
-if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
-  http_response_code(200);
-  exit;
-}
-
-if (($_SERVER["REQUEST_METHOD"] ?? "") !== "POST") {
-  http_response_code(405);
-  echo json_encode(["message" => "Method not allowed"]);
-  exit;
-}
 
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
@@ -105,6 +75,8 @@ try {
       m.weight AS old_weight,
       m.height AS old_height,
       m.muac AS old_muac,
+      m.is_exported_excel,
+      m.excel_exported_at,
       ci.barangay_id,
       ci.sex,
       ci.date_birth,
@@ -123,6 +95,36 @@ try {
   if (!$row) {
     audit_log($pdo, $userId, 'MEASUREMENT_UPDATE_FAILED', 'tbl_measurement', (string)$measureId, 'Measurement not found');
     out(404, ["message" => "Measurement not found"]);
+  }
+
+  $today = new DateTime(date('Y-m-d'));
+  $measuredDate = new DateTime($row['old_date_measured']);
+  $diffDays = (int)$measuredDate->diff($today)->format('%a');
+
+  $isExported = !empty($row['is_exported_excel']) || !empty($row['excel_exported_at']);
+
+  if ($isExported) {
+    audit_log(
+      $pdo,
+      $userId,
+      'MEASUREMENT_UPDATE_DENIED',
+      'tbl_measurement',
+      (string)$measureId,
+      'Measurement already exported to Excel'
+    );
+    out(403, ["message" => "Measurement can no longer be edited because it was already exported to Excel"]);
+  }
+
+  if ($measuredDate < $today && $diffDays > 15) {
+    audit_log(
+      $pdo,
+      $userId,
+      'MEASUREMENT_UPDATE_DENIED',
+      'tbl_measurement',
+      (string)$measureId,
+      'Measurement edit window expired'
+    );
+    out(403, ["message" => "Measurement can only be edited within 15 days from the measurement date"]);
   }
 
   if ($role !== 'admin' && (int)$row['barangay_id'] !== $userBarangayId) {
