@@ -210,6 +210,26 @@ function prevalence(int $num, int $den): string {
   return number_format(($num / $den) * 100, 2);
 }
 
+function mark_measurements_as_exported(PDO $pdo, array $measureIds): int {
+  $measureIds = array_values(array_unique(array_filter(array_map('intval', $measureIds))));
+  if (empty($measureIds)) return 0;
+
+  $placeholders = implode(',', array_fill(0, count($measureIds), '?'));
+
+  $sql = "
+    UPDATE tbl_measurement
+    SET
+      is_exported_excel = 1,
+      excel_exported_at = COALESCE(excel_exported_at, NOW())
+    WHERE measure_id IN ($placeholders)
+  ";
+
+  $st = $pdo->prepare($sql);
+  $st->execute($measureIds);
+
+  return $st->rowCount();
+}
+
 try {
   $authUser = authenticate(['admin', 'user', 'bns']);
   $role = strtolower($authUser->role ?? 'user');
@@ -320,6 +340,11 @@ try {
   ");
   $stmt->execute([$startDate, $nextMonthDate, $barangayId]);
   $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+  $measureIds = array_values(array_filter(array_map(
+  fn($r) => isset($r['measure_id']) ? (int)$r['measure_id'] : 0,
+  $rows
+  )));
 
   $templatePath = __DIR__ . "/templates/opt_1b.xlsx";
   if (!file_exists($templatePath)) {
@@ -637,13 +662,18 @@ try {
     $month
   );
 
+  $exportedCount = mark_measurements_as_exported($pdo, $measureIds);
+
   audit_log(
     $pdo,
     $userId,
     'REPORT_EXPORTED',
     'opt_plus_form_b',
     (string)$barangayId,
-    "Exported OPT Plus Form B for barangay={$barangay['barangay_name']} ({$barangayId}), period={$year}-" . str_pad((string)$month, 2, '0', STR_PAD_LEFT) . ", rows=" . count($rows)
+    "Exported OPT Plus Form B for barangay={$barangay['barangay_name']} ({$barangayId}), period={$year}-" .
+    str_pad((string)$month, 2, '0', STR_PAD_LEFT) .
+    ", rows=" . count($rows) .
+    ", measurements_marked={$exportedCount}"
   );
 
   if (ob_get_length()) {
