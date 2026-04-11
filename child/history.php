@@ -90,6 +90,8 @@ try {
       m.lt_status,
       m.muac_status,
       m.bilateral_pitting,
+      m.is_exported_excel,
+      m.excel_exported_at,
       m.user_id AS encoded_by,
 
       u.users_id,
@@ -116,6 +118,8 @@ try {
     if ($row['encoded_by_name'] === '') {
       $row['encoded_by_name'] = 'Unknown User';
     }
+
+    $row['is_exported_excel'] = (int)($row['is_exported_excel'] ?? 0);
   }
   unset($row);
 

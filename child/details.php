@@ -123,7 +123,9 @@ try {
       m.height_status,
       m.lt_status,
       m.muac_status,
-      m.bilateral_pitting
+      m.bilateral_pitting,
+      m.is_exported_excel,
+      m.excel_exported_at
     FROM tbl_measurement m
     WHERE m.child_seq = ?
     ORDER BY m.date_measured DESC, m.measure_id DESC
@@ -137,6 +139,8 @@ try {
   if (!$latest) {
     $latest = null;
   } else {
+    $latest['is_exported_excel'] = (int)($latest['is_exported_excel'] ?? 0);
+
     if (!empty($child['date_birth']) && !empty($latest['date_measured'])) {
       $birth = new DateTime($child['date_birth']);
       $measured = new DateTime($latest['date_measured']);
