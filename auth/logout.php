@@ -40,9 +40,6 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
-// --------------------
-// Helpers
-// --------------------
 function out($code, $payload) {
   http_response_code($code);
   echo json_encode($payload);
@@ -96,9 +93,6 @@ function audit_log(PDO $pdo, ?int $userId, string $action, ?string $targetTable,
   }
 }
 
-// --------------------
-// Get token
-// --------------------
 $token = get_bearer_token();
 
 if ($token === '') {
@@ -106,13 +100,9 @@ if ($token === '') {
   out(401, ["message" => "Token missing"]);
 }
 
-// detect logout type
 $reason = $_GET['reason'] ?? 'manual';
 
 try {
-  // --------------------
-  // Decode JWT
-  // --------------------
   $secretKey = getenv("JWT_SECRET") ?: "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#";
   $decoded = JWT::decode($token, new Key($secretKey, 'HS256'));
 
@@ -124,9 +114,8 @@ try {
     out(401, ["message" => "Invalid token"]);
   }
 
-  // --------------------
-  // Prevent duplicate blacklist
-  // --------------------
+  $expiresAt = gmdate('Y-m-d H:i:s', $exp);
+
   $check = $pdo->prepare("SELECT COUNT(*) FROM jwt_blacklist WHERE token = ?");
   $check->execute([$token]);
   $alreadyBlacklisted = (int)$check->fetchColumn() > 0;
@@ -136,15 +125,9 @@ try {
       INSERT INTO jwt_blacklist (token, expires_at)
       VALUES (?, ?)
     ");
-    $stmt->execute([
-      $token,
-      date('Y-m-d H:i:s', $exp) // convert timestamp to DATETIME
-    ]);
+    $stmt->execute([$token, $expiresAt]);
   }
 
-  // --------------------
-  // Audit Log
-  // --------------------
   $description = $reason === 'auto'
     ? 'Auto logout due to token expiry'
     : 'Manual logout by user';
@@ -160,8 +143,7 @@ try {
       : $description
   );
 
-  echo json_encode(["message" => "Logged out successfully"]);
-
+  out(200, ["message" => "Logged out successfully"]);
 } catch (Throwable $e) {
   audit_log(
     $pdo,
