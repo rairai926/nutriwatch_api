@@ -126,32 +126,6 @@ function mark_measurements_as_exported(PDO $pdo, array $measureIds): int {
   return $st->rowCount();
 }
 
-function find_existing_measurement_column(PDO $pdo, array $candidates): ?string {
-  $dbName = $pdo->query("SELECT DATABASE()")->fetchColumn();
-
-  $sql = "
-    SELECT COLUMN_NAME
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = ?
-      AND TABLE_NAME = 'tbl_measurement'
-      AND COLUMN_NAME = ?
-    LIMIT 1
-  ";
-
-  $st = $pdo->prepare($sql);
-
-  foreach ($candidates as $column) {
-    $st->execute([$dbName, $column]);
-    $found = $st->fetchColumn();
-
-    if ($found) {
-      return $column;
-    }
-  }
-
-  return null;
-}
-
 function apply_data_row_style($sheet, int $rowNumber): void {
   $sheet->getRowDimension($rowNumber)->setRowHeight(24);
 
@@ -240,31 +214,9 @@ try {
     json_out(404, ["ok" => false, "message" => "Barangay not found"]);
   }
 
-  $heightColumn = find_existing_measurement_column($pdo, [
-    'height',
-    'height_cm',
-    'length_height',
-    'length_height_cm',
-    'lt_height',
-    'child_height'
-  ]);
-
-  $weightColumn = find_existing_measurement_column($pdo, [
-    'weight',
-    'weight_kg',
-    'child_weight',
-    'wt'
-  ]);
-
-  $muacColumn = find_existing_measurement_column($pdo, [
-    'muac',
-    'muac_cm',
-    'muac_value'
-  ]);
-
-  $heightSelect = $heightColumn ? "m.`{$heightColumn}` AS height_value" : "NULL AS height_value";
-  $weightSelect = $weightColumn ? "m.`{$weightColumn}` AS weight_value" : "NULL AS weight_value";
-  $muacSelect = $muacColumn ? "m.`{$muacColumn}` AS muac_value" : "NULL AS muac_value";
+  $heightSelect = "m.height AS height_value";
+  $weightSelect = "m.weight AS weight_value";
+  $muacSelect = "m.muac AS muac_value";
 
   $startDate = sprintf('%04d-%02d-01', $year, $month);
   $nextMonthDate = date('Y-m-d', strtotime($startDate . ' +1 month'));
@@ -306,7 +258,7 @@ try {
     WHERE ci.barangay_id = ?
       AND TIMESTAMPDIFF(MONTH, ci.date_birth, m.date_measured) BETWEEN 0 AND 23
     ORDER BY
-      COALESCE(ci.purok, '') ASC,
+      IFNULL(ci.purok, '') ASC,
       ci.c_lastname ASC,
       ci.c_firstname ASC,
       ci.child_seq ASC
@@ -360,7 +312,6 @@ try {
   $sheet = $spreadsheet->getActiveSheet();
   $sheet->setTitle('0-23 Months');
 
-  // Header values
   $sheet->setCellValue('G6', $barangay['barangay_name'] ?? '');
   $sheet->setCellValue('L6', $barangay['city_name'] ?? '');
   $sheet->setCellValue('P6', $barangay['province_name'] ?? '');
