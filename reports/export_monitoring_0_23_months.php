@@ -127,11 +127,24 @@ function mark_measurements_as_exported(PDO $pdo, array $measureIds): int {
 }
 
 function find_existing_measurement_column(PDO $pdo, array $candidates): ?string {
-  foreach ($candidates as $column) {
-    $st = $pdo->prepare("SHOW COLUMNS FROM tbl_measurement LIKE ?");
-    $st->execute([$column]);
+  $dbName = $pdo->query("SELECT DATABASE()")->fetchColumn();
 
-    if ($st->fetch(PDO::FETCH_ASSOC)) {
+  $sql = "
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ?
+      AND TABLE_NAME = 'tbl_measurement'
+      AND COLUMN_NAME = ?
+    LIMIT 1
+  ";
+
+  $st = $pdo->prepare($sql);
+
+  foreach ($candidates as $column) {
+    $st->execute([$dbName, $column]);
+    $found = $st->fetchColumn();
+
+    if ($found) {
       return $column;
     }
   }
