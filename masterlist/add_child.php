@@ -1,6 +1,5 @@
 <?php
 
-
 ob_start();
 session_start();
 
@@ -36,7 +35,6 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") !== "POST") {
   echo json_encode(["ok" => false, "message" => "Method not allowed"]);
   exit;
 }
-
 
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
@@ -115,7 +113,6 @@ try {
 
   $province_id = 1;
   $city_id = 1;
-
   $barangay_id = 0;
 
   if ($role === 'admin') {
@@ -125,7 +122,7 @@ try {
       out(422, ["ok" => false, "message" => "Admin must provide barangay_id"]);
     }
   } else {
-    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
     $st->execute([$userId]);
     $barangay_id = (int)($st->fetchColumn() ?: 0);
 
@@ -159,9 +156,9 @@ try {
       AND LOWER(TRIM(ci.c_firstname)) = LOWER(TRIM(:c_firstname))
       AND LOWER(TRIM(ci.c_lastname)) = LOWER(TRIM(:c_lastname))
       AND (
-        (:date_birth <> '' AND ci.date_birth = :date_birth_exact)
+        (:has_date_birth = 1 AND ci.date_birth = :date_birth_exact)
         OR
-        (:date_birth = '')
+        (:has_date_birth = 0)
       )
     ORDER BY ci.child_seq DESC
     LIMIT 10
@@ -169,11 +166,11 @@ try {
 
   $dupSt = $pdo->prepare($dupSql);
   $dupSt->execute([
-    ':barangay_id' => $barangay_id,
-    ':c_firstname' => $c_firstname,
-    ':c_lastname' => $c_lastname,
-    ':date_birth' => $date_birth,
-    ':date_birth_exact' => ($date_birth !== '' ? $date_birth : null)
+    ':barangay_id'     => $barangay_id,
+    ':c_firstname'     => $c_firstname,
+    ':c_lastname'      => $c_lastname,
+    ':has_date_birth'  => ($date_birth !== '' ? 1 : 0),
+    ':date_birth_exact'=> ($date_birth !== '' ? $date_birth : null)
   ]);
 
   $duplicates = $dupSt->fetchAll(PDO::FETCH_ASSOC);
@@ -211,40 +208,44 @@ try {
 
   $sql = "
     INSERT INTO tbl_child_info
-      (province_id, city_id, barangay_id, purok,
-       g_lastname, g_firstname, g_middlename,
-       c_lastname, c_firstname, c_middlename,
-       ip_group, sex, date_birth, disability,
-       user_id)
+      (
+        province_id, city_id, barangay_id, purok,
+        g_lastname, g_firstname, g_middlename,
+        c_lastname, c_firstname, c_middlename,
+        ip_group, sex, date_birth, disability,
+        user_id
+      )
     VALUES
-      (:province_id, :city_id, :barangay_id, :purok,
-       :g_lastname, :g_firstname, :g_middlename,
-       :c_lastname, :c_firstname, :c_middlename,
-       :ip_group, :sex, :date_birth, :disability,
-       :user_id)
+      (
+        :province_id, :city_id, :barangay_id, :purok,
+        :g_lastname, :g_firstname, :g_middlename,
+        :c_lastname, :c_firstname, :c_middlename,
+        :ip_group, :sex, :date_birth, :disability,
+        :user_id
+      )
   ";
 
   $st = $pdo->prepare($sql);
   $st->execute([
-    ':province_id' => $province_id,
-    ':city_id' => $city_id,
-    ':barangay_id' => $barangay_id,
-    ':purok' => ($purok !== '' ? $purok : null),
+    ':province_id'   => $province_id,
+    ':city_id'       => $city_id,
+    ':barangay_id'   => $barangay_id,
+    ':purok'         => ($purok !== '' ? $purok : null),
 
-    ':g_lastname' => ($g_lastname !== '' ? $g_lastname : null),
-    ':g_firstname' => ($g_firstname !== '' ? $g_firstname : null),
-    ':g_middlename' => ($g_middlename !== '' ? $g_middlename : null),
+    ':g_lastname'    => ($g_lastname !== '' ? $g_lastname : null),
+    ':g_firstname'   => ($g_firstname !== '' ? $g_firstname : null),
+    ':g_middlename'  => ($g_middlename !== '' ? $g_middlename : null),
 
-    ':c_lastname' => $c_lastname,
-    ':c_firstname' => $c_firstname,
-    ':c_middlename' => ($c_middlename !== '' ? $c_middlename : null),
+    ':c_lastname'    => $c_lastname,
+    ':c_firstname'   => $c_firstname,
+    ':c_middlename'  => ($c_middlename !== '' ? $c_middlename : null),
 
-    ':ip_group' => ($ip_group !== '' ? $ip_group : null),
-    ':sex' => $sex,
-    ':date_birth' => ($date_birth !== '' ? $date_birth : null),
-    ':disability' => ($disability !== '' ? $disability : null),
+    ':ip_group'      => ($ip_group !== '' ? $ip_group : null),
+    ':sex'           => $sex,
+    ':date_birth'    => ($date_birth !== '' ? $date_birth : null),
+    ':disability'    => ($disability !== '' ? $disability : null),
 
-    ':user_id' => $userId
+    ':user_id'       => $userId
   ]);
 
   $newChildSeq = (int)$pdo->lastInsertId();
@@ -261,6 +262,7 @@ try {
     "message" => "Child added",
     "child_seq" => $newChildSeq
   ]);
+
 } catch (Throwable $e) {
   error_log("add_child.php error: " . $e->getMessage());
   out(500, ["ok" => false, "message" => "Server error", "error" => $e->getMessage()]);
