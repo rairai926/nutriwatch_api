@@ -11,7 +11,8 @@ $allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://192.168.1.36:3000",
-  "https://nutriwatch.com"
+  "https://nutriwatch.com",
+  "https://nutriwatch-cyan.vercel.app"
 ];
 
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
