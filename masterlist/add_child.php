@@ -140,38 +140,61 @@ try {
   // --------------------
   // Duplicate detection
   // --------------------
-  $dupSql = "
-    SELECT
-      ci.child_seq,
-      ci.c_firstname,
-      ci.c_middlename,
-      ci.c_lastname,
-      ci.sex,
-      ci.date_birth,
-      ci.purok,
-      b.barangay_name
-    FROM tbl_child_info ci
-    LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
-    WHERE ci.barangay_id = :barangay_id
-      AND LOWER(TRIM(ci.c_firstname)) = LOWER(TRIM(:c_firstname))
-      AND LOWER(TRIM(ci.c_lastname)) = LOWER(TRIM(:c_lastname))
-      AND (
-        (:has_date_birth = 1 AND ci.date_birth = :date_birth_exact)
-        OR
-        (:has_date_birth = 0)
-      )
-    ORDER BY ci.child_seq DESC
-    LIMIT 10
-  ";
+  if ($date_birth !== '') {
+    $dupSql = "
+      SELECT
+        ci.child_seq,
+        ci.c_firstname,
+        ci.c_middlename,
+        ci.c_lastname,
+        ci.sex,
+        ci.date_birth,
+        ci.purok,
+        b.barangay_name
+      FROM tbl_child_info ci
+      LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
+      WHERE ci.barangay_id = :barangay_id
+        AND LOWER(TRIM(ci.c_firstname)) = LOWER(TRIM(:c_firstname))
+        AND LOWER(TRIM(ci.c_lastname)) = LOWER(TRIM(:c_lastname))
+        AND ci.date_birth = :date_birth
+      ORDER BY ci.child_seq DESC
+      LIMIT 10
+    ";
 
-  $dupSt = $pdo->prepare($dupSql);
-  $dupSt->execute([
-    ':barangay_id'     => $barangay_id,
-    ':c_firstname'     => $c_firstname,
-    ':c_lastname'      => $c_lastname,
-    ':has_date_birth'  => ($date_birth !== '' ? 1 : 0),
-    ':date_birth_exact'=> ($date_birth !== '' ? $date_birth : null)
-  ]);
+    $dupSt = $pdo->prepare($dupSql);
+    $dupSt->execute([
+      ':barangay_id' => $barangay_id,
+      ':c_firstname' => $c_firstname,
+      ':c_lastname'  => $c_lastname,
+      ':date_birth'  => $date_birth
+    ]);
+  } else {
+    $dupSql = "
+      SELECT
+        ci.child_seq,
+        ci.c_firstname,
+        ci.c_middlename,
+        ci.c_lastname,
+        ci.sex,
+        ci.date_birth,
+        ci.purok,
+        b.barangay_name
+      FROM tbl_child_info ci
+      LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
+      WHERE ci.barangay_id = :barangay_id
+        AND LOWER(TRIM(ci.c_firstname)) = LOWER(TRIM(:c_firstname))
+        AND LOWER(TRIM(ci.c_lastname)) = LOWER(TRIM(:c_lastname))
+      ORDER BY ci.child_seq DESC
+      LIMIT 10
+    ";
+
+    $dupSt = $pdo->prepare($dupSql);
+    $dupSt->execute([
+      ':barangay_id' => $barangay_id,
+      ':c_firstname' => $c_firstname,
+      ':c_lastname'  => $c_lastname
+    ]);
+  }
 
   $duplicates = $dupSt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -191,7 +214,7 @@ try {
       "duplicate_warning" => true,
       "duplicates" => array_map(function ($r) {
         return [
-          "child_seq" => (int)$r["child_seq"],
+          "child_seq" => (int)($r["child_seq"] ?? 0),
           "child_name" => trim(implode(' ', array_filter([
             $r["c_firstname"] ?? '',
             $r["c_middlename"] ?? '',
