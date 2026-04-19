@@ -15,7 +15,7 @@ $allowedViews = ['all', 'updated', 'outdated', 'archive'];
 if (!in_array($view, $allowedViews, true)) $view = 'all';
 
 $page  = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$limit = isset($_GET['limit']) ? (int)($_GET['limit']) : 10;
+$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
 if ($page < 1) $page = 1;
 if ($limit < 1) $limit = 1;
 if ($limit > 100) $limit = 100;
@@ -171,7 +171,6 @@ if ($measurement === 'with') {
   $where[] = "lm.last_measured IS NULL";
 }
 
-// view filter
 if ($view === 'updated') {
   $where[] = "lm.last_measured >= ? AND lm.last_measured < ?";
   $params[] = $firstDay;
