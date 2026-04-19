@@ -171,7 +171,6 @@ if ($measurement === 'with') {
   $where[] = "lm.last_measured IS NULL";
 }
 
-// view filter
 if ($view === 'updated') {
   $where[] = "lm.last_measured >= ? AND lm.last_measured < ?";
   $params[] = $firstDay;
@@ -209,7 +208,7 @@ $total = (int)$st->fetchColumn();
 
 // --------------------
 // Added this month
-// NOTE: assumes tbl_child_info has created_at column
+// IMPORTANT: change ci.date_added if your real column name is different
 // --------------------
 $addedWhere = [];
 $addedParams = [];
@@ -219,10 +218,11 @@ if ($role !== 'admin') {
   $addedParams[] = $userBarangayId;
 }
 
-$addedWhere[] = "ci.created_at >= ?";
+$addedWhere[] = "ci.date_added IS NOT NULL";
+$addedWhere[] = "ci.date_added >= ?";
 $addedParams[] = $firstDay;
 
-$addedWhere[] = "ci.created_at < ?";
+$addedWhere[] = "ci.date_added < ?";
 $addedParams[] = $nextMonthFirstDay;
 
 $addedWhereSql = "WHERE " . implode(" AND ", $addedWhere);
