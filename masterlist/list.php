@@ -132,7 +132,6 @@ if ($view === 'archive') {
     "page" => $page,
     "limit" => $limit,
     "total" => $total,
-    "added_this_month" => 0,
     "rows" => $rows
   ]);
   exit;
@@ -207,37 +206,6 @@ $st = $pdo->prepare($countSql);
 $st->execute($params);
 $total = (int)$st->fetchColumn();
 
-// --------------------
-// Added This Month
-// IMPORTANT:
-// Replace ci.date_added with your actual date-added column
-// Example alternatives: ci.created_at, ci.created_on, ci.added_at
-// --------------------
-$addedWhere = [];
-$addedParams = [];
-
-if ($role !== 'admin') {
-  $addedWhere[] = "ci.barangay_id = ?";
-  $addedParams[] = $userBarangayId;
-}
-
-$addedWhere[] = "ci.date_added IS NOT NULL";
-$addedWhere[] = "ci.date_added >= ?";
-$addedParams[] = $firstDay;
-$addedWhere[] = "ci.date_added < ?";
-$addedParams[] = $nextMonthFirstDay;
-
-$addedWhereSql = "WHERE " . implode(" AND ", $addedWhere);
-
-$addedSql = "
-  SELECT COUNT(*)
-  FROM tbl_child_info ci
-  $addedWhereSql
-";
-$stAdded = $pdo->prepare($addedSql);
-$stAdded->execute($addedParams);
-$addedThisMonth = (int)$stAdded->fetchColumn();
-
 $listSql = "
   SELECT
     ci.child_seq,
@@ -274,6 +242,5 @@ echo json_encode([
   "page" => $page,
   "limit" => $limit,
   "total" => $total,
-  "added_this_month" => $addedThisMonth,
   "rows" => $rows
 ]);
