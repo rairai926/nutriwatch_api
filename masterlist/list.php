@@ -15,7 +15,7 @@ $allowedViews = ['all', 'updated', 'outdated', 'archive'];
 if (!in_array($view, $allowedViews, true)) $view = 'all';
 
 $page  = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
+$limit = isset($_GET['limit']) ? (int)($_GET['limit']) : 10;
 if ($page < 1) $page = 1;
 if ($limit < 1) $limit = 1;
 if ($limit > 100) $limit = 100;
@@ -108,6 +108,7 @@ if ($view === 'archive') {
       ca.c_firstname,
       ca.c_middlename,
       ca.c_lastname,
+      ca.date_birth,
       ca.g_firstname,
       ca.g_middlename,
       ca.g_lastname,
@@ -212,6 +213,7 @@ $listSql = "
     ci.c_firstname,
     ci.c_middlename,
     ci.c_lastname,
+    ci.date_birth,
     ci.g_firstname,
     ci.g_middlename,
     ci.g_lastname,
