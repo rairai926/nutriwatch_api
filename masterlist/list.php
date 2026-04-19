@@ -171,6 +171,7 @@ if ($measurement === 'with') {
   $where[] = "lm.last_measured IS NULL";
 }
 
+// view filter
 if ($view === 'updated') {
   $where[] = "lm.last_measured >= ? AND lm.last_measured < ?";
   $params[] = $firstDay;
@@ -207,8 +208,10 @@ $st->execute($params);
 $total = (int)$st->fetchColumn();
 
 // --------------------
-// Added this month
-// IMPORTANT: change ci.date_added if your real column name is different
+// Added This Month
+// IMPORTANT:
+// Replace ci.date_added with your actual date-added column
+// Example alternatives: ci.created_at, ci.created_on, ci.added_at
 // --------------------
 $addedWhere = [];
 $addedParams = [];
@@ -221,7 +224,6 @@ if ($role !== 'admin') {
 $addedWhere[] = "ci.date_added IS NOT NULL";
 $addedWhere[] = "ci.date_added >= ?";
 $addedParams[] = $firstDay;
-
 $addedWhere[] = "ci.date_added < ?";
 $addedParams[] = $nextMonthFirstDay;
 
