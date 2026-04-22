@@ -146,7 +146,9 @@ try {
   $ltStatus = $statuses['lt_status'];
   $muacStatus = $statuses['muac_status'];
 
-  // Block new measurement unless at least 1 month has passed from the latest measurement
+  // Block new measurement based on monitoring rule:
+  // 0–23 months  => monthly
+  // 24–59 months => quarterly (every 3 months)
   $lastMeasurement = $pdo->prepare("
     SELECT measure_id, date_measured
     FROM tbl_measurement
@@ -162,7 +164,16 @@ try {
 
     if ($lastDateObj) {
       $allowedDateObj = clone $lastDateObj;
-      $allowedDateObj->modify('+1 month');
+
+      if ($ageMonths <= 23) {
+        $allowedDateObj->modify('+1 month');
+        $ruleLabel = 'monthly';
+      } elseif ($ageMonths <= 59) {
+        $allowedDateObj->modify('+3 months');
+        $ruleLabel = 'quarterly';
+      } else {
+        $ruleLabel = 'beyond under-5';
+      }
 
       if ($dateObj < $allowedDateObj) {
         $lastDate = $lastDateObj->format('Y-m-d');
@@ -174,11 +185,11 @@ try {
           'MEASUREMENT_ADD_BLOCKED',
           'tbl_measurement',
           (string)$childSeq,
-          "Measurement too soon. Last: {$lastDate}, Next allowed: {$allowedDate}"
+          "Measurement too soon ({$ruleLabel}). Last: {$lastDate}, Next allowed: {$allowedDate}"
         );
 
         out(409, [
-          "message" => "A new measurement can only be added on or after {$allowedDate}"
+          "message" => "This child follows {$ruleLabel} monitoring. A new measurement can only be added on or after {$allowedDate}"
         ]);
       }
     }
@@ -194,11 +205,13 @@ try {
         height,
         muac,
         age_months,
+        age_days,
         weight_status,
         height_status,
         lt_status,
         muac_status,
-        bilateral_pitting
+        bilateral_pitting,
+        assessment_method
       )
     VALUES
       (
@@ -209,11 +222,13 @@ try {
         :height,
         :muac,
         :age_months,
+        :age_days,
         :weight_status,
         :height_status,
         :lt_status,
         :muac_status,
-        :bilateral_pitting
+        :bilateral_pitting,
+        :assessment_method
       )
   ";
 
@@ -226,11 +241,13 @@ try {
     ':height' => $height,
     ':muac' => $muac,
     ':age_months' => $ageMonths,
+    ':age_days' => $ageDays,
     ':weight_status' => $weightStatus,
     ':height_status' => $heightStatus,
     ':lt_status' => $ltStatus,
     ':muac_status' => $muacStatus,
-    ':bilateral_pitting' => $bilateralPitting
+    ':bilateral_pitting' => $bilateralPitting,
+    ':assessment_method' => $assessmentMethod
   ]);
 
   $measureId = (int)$pdo->lastInsertId();
