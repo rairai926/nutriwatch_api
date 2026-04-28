@@ -8,25 +8,36 @@ header("Content-Type: application/json; charset=utf-8");
 // CORS (shared)
 // --------------------
 $allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://nutriwatch.com",
-  "http://192.168.1.36:3000",
-  "https://nutriwatch-cyan.vercel.app"
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://192.168.1.36:3000",
+    "https://nutriwatch.com",
+    "https://nutriwatch-cyan.vercel.app"
 ];
 
-$origin = $_SERVER["HTTP_ORIGIN"] ?? "";
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+
 if ($origin && in_array($origin, $allowedOrigins, true)) {
-  header("Access-Control-Allow-Origin: $origin");
-  header("Access-Control-Allow-Credentials: true");
+    header("Access-Control-Allow-Origin: $origin");
+    header("Vary: Origin");
 }
 
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Credentials: true");
 
-if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
-  http_response_code(200);
-  exit;
+header("X-Frame-Options: SAMEORIGIN");
+header("Content-Security-Policy: frame-ancestors 'self';");
+header("X-Content-Type-Options: nosniff");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
+header("Strict-Transport-Security: max-age=31536000; includeSubDomains");
+
+header("Content-Type: application/json; charset=UTF-8");
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
 }
 
 require_once __DIR__ . "/../vendor/autoload.php";
