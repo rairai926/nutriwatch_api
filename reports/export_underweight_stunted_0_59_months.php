@@ -1,34 +1,4 @@
 <?php
-ob_start();
-session_start();
-
-$allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://nutriwatch.com",
-  "http://192.168.1.36:3000"
-];
-
-$origin = $_SERVER["HTTP_ORIGIN"] ?? "";
-if ($origin && in_array($origin, $allowedOrigins, true)) {
-  header("Access-Control-Allow-Origin: $origin");
-  header("Access-Control-Allow-Credentials: true");
-}
-header("Vary: Origin");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Methods: GET, OPTIONS");
-
-if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
-  http_response_code(200);
-  exit;
-}
-
-if (($_SERVER["REQUEST_METHOD"] ?? "") !== "GET") {
-  http_response_code(405);
-  header("Content-Type: application/json; charset=utf-8");
-  echo json_encode(["ok" => false, "message" => "Method not allowed"]);
-  exit;
-}
 
 require_once __DIR__ . "/../vendor/autoload.php";
 require_once __DIR__ . "/../config/db.php";
