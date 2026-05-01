@@ -50,7 +50,7 @@ function tableExists(PDO $pdo, string $table): bool {
   try { $st = $pdo->prepare("SHOW TABLES LIKE ?"); $st->execute([$table]); return (bool)$st->fetchColumn(); }
   catch (Throwable $e) { return false; }
 }
-$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
+$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_measurement';
 
 function likeAny(string $column, array $patterns): array {
   $parts = [];

@@ -58,7 +58,7 @@ function tableExists(PDO $pdo, string $table): bool {
   }
 }
 
-$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
+$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_measurement';
 
 function likeAny(string $column, array $patterns): array {
   $parts = [];
