@@ -56,8 +56,8 @@ function tableExists(PDO $pdo, string $table): bool {
   }
 }
 
-// Use tbl_measurement by default, but support the common typo tbl_mesurement if your database uses it.
-$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
+// Use tbl_measurement by default, but support the common typo tbl_measurement if your database uses it.
+$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_measurement';
 
 function statusCondition(string $column, string $status): array {
   $s = strtolower(trim($status));
