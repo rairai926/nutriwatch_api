@@ -13,9 +13,14 @@ $options = [
     PDO::ATTR_EMULATE_PREPARES => false,
 ];
 
-$ca = __DIR__ . '/ca.pem';
-if (file_exists($ca) && filesize($ca) > 0) {
-    $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
+$useSSL = getenv('DB_SSL') === 'true';
+
+if ($useSSL) {
+    $ca = __DIR__ . '/ca.pem';
+
+    if (file_exists($ca) && filesize($ca) > 0) {
+        $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
+    }
 }
 
 try {
