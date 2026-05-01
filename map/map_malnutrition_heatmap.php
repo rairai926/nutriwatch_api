@@ -56,8 +56,8 @@ function tableExists(PDO $pdo, string $table): bool {
   }
 }
 
-// Use tbl_measurement by default, but support the common typo tbl_measurement if your database uses it.
-$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_measurement';
+// Use tbl_measurement by default, but support the common typo tbl_mesurement if your database uses it.
+$measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
 
 function statusCondition(string $column, string $status): array {
   $s = strtolower(trim($status));
@@ -66,7 +66,7 @@ function statusCondition(string $column, string $status): array {
     return ["LOWER(m.$column) LIKE ?", ['%underweight%']];
   }
   if ($s === 'stunted') {
-    return ["LOWER(m.$column) LIKE ?", ['%stunted%']];
+    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%stunted%', '%student%']];
   }
   if ($s === 'wasted') {
     return ["LOWER(m.$column) LIKE ?", ['%wasted%']];
@@ -94,7 +94,7 @@ function severeCondition(string $column, string $status): array {
     return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely underweight%', '%severe underweight%']];
   }
   if ($s === 'stunted') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%']];
+    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%', '%severely student%', '%severe student%']];
   }
   if ($s === 'wasted') {
     return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely wasted%', '%severe wasted%']];
@@ -136,6 +136,8 @@ $sql = "
     b.barangay_code,
     COUNT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.child_seq END) AS moderate_cases,
     COUNT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.child_seq END) AS severe_cases,
+    GROUP_CONCAT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.$column END ORDER BY m.$column SEPARATOR ', ') AS moderate_labels,
+    GROUP_CONCAT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.$column END ORDER BY m.$column SEPARATOR ', ') AS severe_labels,
     COUNT(DISTINCT m.child_seq) AS measured_children,
     MAX(m.date_measured) AS last_measurement_date
   FROM tbl_barangay b
@@ -147,7 +149,7 @@ $sql = "
 ";
 
 $params = [];
-$params = array_merge($params, $statusParams, $severeParams, $statusParams, $severeParams, [$year], $scopeParams);
+$params = array_merge($params, $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams, [$year], $scopeParams);
 $st = $pdo->prepare($sql);
 $st->execute($params);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -157,6 +159,8 @@ foreach ($rows as &$r) {
   $r['moderate_cases'] = (int)$r['moderate_cases'];
   $r['severe_cases'] = (int)$r['severe_cases'];
   $r['total_cases'] = $r['moderate_cases'] + $r['severe_cases'];
+  $r['moderate_labels'] = $r['moderate_labels'] ?: '';
+  $r['severe_labels'] = $r['severe_labels'] ?: '';
   $r['weighted_cases'] = $r['moderate_cases'] + ($r['severe_cases'] * 2);
   $r['measured_children'] = (int)$r['measured_children'];
 }

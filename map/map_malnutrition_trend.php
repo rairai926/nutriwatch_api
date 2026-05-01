@@ -57,7 +57,7 @@ $measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : '
 function statusCondition(string $column, string $status): array {
   $s = strtolower(trim($status));
   if ($s === 'underweight') return ["LOWER(m.$column) LIKE ?", ['%underweight%']];
-  if ($s === 'stunted') return ["LOWER(m.$column) LIKE ?", ['%stunted%']];
+  if ($s === 'stunted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%stunted%', '%student%']];
   if ($s === 'wasted') return ["LOWER(m.$column) LIKE ?", ['%wasted%']];
   if ($s === 'overweight_obese') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%overweight%', '%obese%']];
   if ($s === 'mam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%']];
@@ -69,7 +69,7 @@ function statusCondition(string $column, string $status): array {
 function severeCondition(string $column, string $status): array {
   $s = strtolower(trim($status));
   if ($s === 'underweight') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely underweight%', '%severe underweight%']];
-  if ($s === 'stunted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%']];
+  if ($s === 'stunted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%', '%severely student%', '%severe student%']];
   if ($s === 'wasted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely wasted%', '%severe wasted%']];
   if ($s === 'overweight_obese') return ["LOWER(m.$column) LIKE ?", ['%obese%']];
   if ($s === 'sam' || $s === 'mam_sam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%', '%severe%']];
