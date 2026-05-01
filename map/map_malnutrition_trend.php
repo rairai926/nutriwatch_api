@@ -31,8 +31,7 @@ $barangayId = (int)($_GET['barangay_id'] ?? 0);
 $barangayCode = strtoupper(preg_replace('/\s+/u', '', trim($_GET['barangay_code'] ?? '')));
 $indicator = trim($_GET['indicator'] ?? 'wfa');
 $status = trim($_GET['status'] ?? 'underweight');
-$severity = trim($_GET['severity'] ?? 'all'); // all, moderate, severe
-$groupBy = trim($_GET['group_by'] ?? 'year'); // year, month
+$groupBy = trim($_GET['group_by'] ?? 'year');
 $year = (int)($_GET['year'] ?? date('Y'));
 
 $indicatorMap = [
@@ -43,7 +42,6 @@ $indicatorMap = [
 ];
 
 if (!isset($indicatorMap[$indicator])) { http_response_code(400); echo json_encode(['ok' => false, 'message' => 'Invalid indicator']); exit; }
-if (!in_array($severity, ['all', 'moderate', 'severe'], true)) { http_response_code(400); echo json_encode(['ok' => false, 'message' => 'Invalid severity']); exit; }
 if (!in_array($groupBy, ['year', 'month'], true)) { http_response_code(400); echo json_encode(['ok' => false, 'message' => 'Invalid group_by']); exit; }
 
 $column = $indicatorMap[$indicator];
@@ -54,32 +52,42 @@ function tableExists(PDO $pdo, string $table): bool {
 }
 $measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
 
-function statusCondition(string $column, string $status): array {
-  $s = strtolower(trim($status));
-  if ($s === 'underweight') return ["LOWER(m.$column) LIKE ?", ['%underweight%']];
-  if ($s === 'stunted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%stunted%', '%student%']];
-  if ($s === 'wasted') return ["LOWER(m.$column) LIKE ?", ['%wasted%']];
-  if ($s === 'overweight_obese') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%overweight%', '%obese%']];
-  if ($s === 'mam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%']];
-  if ($s === 'sam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%']];
-  if ($s === 'mam_sam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%', '%sam%', '%red%']];
-  return ["LOWER(m.$column) LIKE ?", ['%' . $s . '%']];
+function likeAny(string $column, array $patterns): array {
+  $parts = [];
+  $params = [];
+  foreach ($patterns as $p) {
+    $parts[] = "LOWER(m.$column) LIKE ?";
+    $params[] = $p;
+  }
+  return ['(' . implode(' OR ', $parts) . ')', $params];
 }
 
-function severeCondition(string $column, string $status): array {
-  $s = strtolower(trim($status));
-  if ($s === 'underweight') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely underweight%', '%severe underweight%']];
-  if ($s === 'stunted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%', '%severely student%', '%severe student%']];
-  if ($s === 'wasted') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely wasted%', '%severe wasted%']];
-  if ($s === 'overweight_obese') return ["LOWER(m.$column) LIKE ?", ['%obese%']];
-  if ($s === 'sam' || $s === 'mam_sam') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%', '%severe%']];
-  return ["1 = 0", []];
-}
+function statusCondition(string $column, string $indicator, string $status): array {
+  $status = strtolower(trim($status));
 
-function severityWhereSql(string $statusWhere, string $severeWhere, string $severity): string {
-  if ($severity === 'moderate') return "($statusWhere AND NOT ($severeWhere))";
-  if ($severity === 'severe') return "($statusWhere AND ($severeWhere))";
-  return "($statusWhere)";
+  $severeUnderweight = "(LOWER(m.$column) LIKE '%severely underweight%' OR LOWER(m.$column) LIKE '%severe underweight%')";
+  $severeStunted = "(LOWER(m.$column) LIKE '%severely stunted%' OR LOWER(m.$column) LIKE '%severe stunted%' OR LOWER(m.$column) LIKE '%severely student%' OR LOWER(m.$column) LIKE '%severe student%')";
+  $severeWasted = "(LOWER(m.$column) LIKE '%severely wasted%' OR LOWER(m.$column) LIKE '%severe wasted%')";
+
+  if ($status === 'all_malnutrition') {
+    if ($indicator === 'wfa') return likeAny($column, ['%underweight%']);
+    if ($indicator === 'hfa') return likeAny($column, ['%stunted%', '%student%']);
+    if ($indicator === 'wfh') return likeAny($column, ['%wasted%', '%overweight%', '%obese%']);
+    if ($indicator === 'muac') return likeAny($column, ['%mam%', '%yellow%', '%sam%', '%red%']);
+  }
+
+  if ($status === 'underweight') return ["(LOWER(m.$column) LIKE ? AND NOT $severeUnderweight)", ['%underweight%']];
+  if ($status === 'severely_underweight') return ["$severeUnderweight", []];
+  if ($status === 'stunted') return ["((LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?) AND NOT $severeStunted)", ['%stunted%', '%student%']];
+  if ($status === 'severely_stunted') return ["$severeStunted", []];
+  if ($status === 'wasted') return ["(LOWER(m.$column) LIKE ? AND NOT $severeWasted)", ['%wasted%']];
+  if ($status === 'severely_wasted') return ["$severeWasted", []];
+  if ($status === 'overweight') return ["(LOWER(m.$column) LIKE ? AND LOWER(m.$column) NOT LIKE ?)", ['%overweight%', '%obese%']];
+  if ($status === 'obese') return ["LOWER(m.$column) LIKE ?", ['%obese%']];
+  if ($status === 'mam_yellow') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%']];
+  if ($status === 'sam_red') return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%']];
+
+  return ["LOWER(m.$column) LIKE ?", ['%' . $status . '%']];
 }
 
 $barangay = null;
@@ -89,7 +97,7 @@ if ($barangayId > 0) {
   $barangay = $st->fetch(PDO::FETCH_ASSOC);
 }
 if (!$barangay && $barangayCode !== '') {
-  $st = $pdo->prepare("SELECT barangay_id, barangay_name, barangay_code FROM tbl_barangay WHERE UPPER(REGEXP_REPLACE(COALESCE(barangay_code,''), '[[:space:]]+', '')) = ? LIMIT 1");
+  $st = $pdo->prepare("SELECT barangay_id, barangay_name, barangay_code FROM tbl_barangay WHERE UPPER(REPLACE(REPLACE(COALESCE(barangay_code,''), ' ', ''), CHAR(160), '')) = ? LIMIT 1");
   $st->execute([$barangayCode]);
   $barangay = $st->fetch(PDO::FETCH_ASSOC);
 }
@@ -105,17 +113,13 @@ if ($role !== 'admin') {
   }
 }
 
-[$statusWhere, $statusParams] = statusCondition($column, $status);
-[$severeWhere, $severeParams] = severeCondition($column, $status);
-$displayWhere = severityWhereSql($statusWhere, $severeWhere, $severity);
+[$statusWhere, $statusParams] = statusCondition($column, $indicator, $status);
 
 if ($groupBy === 'month') {
   $sql = "
     SELECT
       MONTH(m.date_measured) AS period_no,
-      COUNT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.child_seq END) AS moderate,
-      COUNT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.child_seq END) AS severe,
-      COUNT(DISTINCT CASE WHEN $displayWhere THEN m.child_seq END) AS total
+      COUNT(DISTINCT CASE WHEN $statusWhere THEN m.child_seq END) AS cases
     FROM $measurementTable m
     JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
     WHERE ci.barangay_id = ?
@@ -123,55 +127,46 @@ if ($groupBy === 'month') {
     GROUP BY MONTH(m.date_measured)
     ORDER BY period_no ASC
   ";
-  $params = array_merge([$barangayId, $year], $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams);
-  $st = $pdo->prepare($sql); $st->execute($params);
+  $params = array_merge($statusParams, [$barangayId, $year]);
+  $st = $pdo->prepare($sql);
+  $st->execute($params);
   $found = [];
   foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-    $found[(int)$r['period_no']] = [
-      'moderate' => (int)$r['moderate'],
-      'severe' => (int)$r['severe'],
-      'total' => (int)$r['total']
-    ];
+    $found[(int)$r['period_no']] = (int)$r['cases'];
   }
   $labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   $series = [];
   for ($i = 1; $i <= 12; $i++) {
     $series[] = [
-      'period' => $labels[$i-1],
+      'period' => $labels[$i - 1],
       'period_no' => $i,
-      'moderate' => $found[$i]['moderate'] ?? 0,
-      'severe' => $found[$i]['severe'] ?? 0,
-      'total' => $found[$i]['total'] ?? 0
+      'cases' => $found[$i] ?? 0
     ];
   }
 } else {
   $sql = "
     SELECT
       YEAR(m.date_measured) AS period_no,
-      COUNT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.child_seq END) AS moderate,
-      COUNT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.child_seq END) AS severe,
-      COUNT(DISTINCT CASE WHEN $displayWhere THEN m.child_seq END) AS total
+      COUNT(DISTINCT CASE WHEN $statusWhere THEN m.child_seq END) AS cases
     FROM $measurementTable m
     JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
     WHERE ci.barangay_id = ?
     GROUP BY YEAR(m.date_measured)
     ORDER BY period_no ASC
   ";
-  $params = array_merge([$barangayId], $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams);
-  $st = $pdo->prepare($sql); $st->execute($params);
+  $params = array_merge($statusParams, [$barangayId]);
+  $st = $pdo->prepare($sql);
+  $st->execute($params);
   $series = array_map(fn($r) => [
     'period' => (string)$r['period_no'],
     'period_no' => (int)$r['period_no'],
-    'moderate' => (int)$r['moderate'],
-    'severe' => (int)$r['severe'],
-    'total' => (int)$r['total']
+    'cases' => (int)$r['cases']
   ], $st->fetchAll(PDO::FETCH_ASSOC));
 }
 
 $yearsStmt = $pdo->prepare("SELECT DISTINCT YEAR(m.date_measured) AS y FROM $measurementTable m JOIN tbl_child_info ci ON ci.child_seq = m.child_seq WHERE ci.barangay_id = ? AND m.date_measured IS NOT NULL ORDER BY y DESC");
 $yearsStmt->execute([$barangayId]);
 $years = array_values(array_filter(array_map('intval', $yearsStmt->fetchAll(PDO::FETCH_COLUMN))));
-
 if (!$years) $years = [(int)date('Y')];
 
 echo json_encode([
@@ -180,7 +175,6 @@ echo json_encode([
   'barangay_name' => $barangay['barangay_name'],
   'indicator' => $indicator,
   'status' => $status,
-  'severity' => $severity,
   'group_by' => $groupBy,
   'year' => $year,
   'years' => $years,

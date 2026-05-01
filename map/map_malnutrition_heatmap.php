@@ -56,59 +56,64 @@ function tableExists(PDO $pdo, string $table): bool {
   }
 }
 
-// Use tbl_measurement by default, but support the common typo tbl_mesurement if your database uses it.
 $measurementTable = tableExists($pdo, 'tbl_measurement') ? 'tbl_measurement' : 'tbl_mesurement';
 
-function statusCondition(string $column, string $status): array {
-  $s = strtolower(trim($status));
-
-  if ($s === 'underweight') {
-    return ["LOWER(m.$column) LIKE ?", ['%underweight%']];
+function likeAny(string $column, array $patterns): array {
+  $parts = [];
+  $params = [];
+  foreach ($patterns as $p) {
+    $parts[] = "LOWER(m.$column) LIKE ?";
+    $params[] = $p;
   }
-  if ($s === 'stunted') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%stunted%', '%student%']];
-  }
-  if ($s === 'wasted') {
-    return ["LOWER(m.$column) LIKE ?", ['%wasted%']];
-  }
-  if ($s === 'overweight_obese') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%overweight%', '%obese%']];
-  }
-  if ($s === 'mam') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%']];
-  }
-  if ($s === 'sam') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%']];
-  }
-  if ($s === 'mam_sam') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%', '%sam%', '%red%']];
-  }
-
-  return ["LOWER(m.$column) LIKE ?", ['%' . $s . '%']];
+  return ['(' . implode(' OR ', $parts) . ')', $params];
 }
 
-function severeCondition(string $column, string $status): array {
-  $s = strtolower(trim($status));
+function statusCondition(string $column, string $indicator, string $status): array {
+  $status = strtolower(trim($status));
 
-  if ($s === 'underweight') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely underweight%', '%severe underweight%']];
+  $severeUnderweight = "(LOWER(m.$column) LIKE '%severely underweight%' OR LOWER(m.$column) LIKE '%severe underweight%')";
+  $severeStunted = "(LOWER(m.$column) LIKE '%severely stunted%' OR LOWER(m.$column) LIKE '%severe stunted%' OR LOWER(m.$column) LIKE '%severely student%' OR LOWER(m.$column) LIKE '%severe student%')";
+  $severeWasted = "(LOWER(m.$column) LIKE '%severely wasted%' OR LOWER(m.$column) LIKE '%severe wasted%')";
+
+  if ($status === 'all_malnutrition') {
+    if ($indicator === 'wfa') return likeAny($column, ['%underweight%']);
+    if ($indicator === 'hfa') return likeAny($column, ['%stunted%', '%student%']);
+    if ($indicator === 'wfh') return likeAny($column, ['%wasted%', '%overweight%', '%obese%']);
+    if ($indicator === 'muac') return likeAny($column, ['%mam%', '%yellow%', '%sam%', '%red%']);
   }
-  if ($s === 'stunted') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely stunted%', '%severe stunted%', '%severely student%', '%severe student%']];
+
+  if ($status === 'underweight') {
+    return ["(LOWER(m.$column) LIKE ? AND NOT $severeUnderweight)", ['%underweight%']];
   }
-  if ($s === 'wasted') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%severely wasted%', '%severe wasted%']];
+  if ($status === 'severely_underweight') {
+    return ["$severeUnderweight", []];
   }
-  if ($s === 'overweight_obese') {
-    // Treat obese as the more severe excess-weight classification and overweight as moderate.
+  if ($status === 'stunted') {
+    return ["((LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?) AND NOT $severeStunted)", ['%stunted%', '%student%']];
+  }
+  if ($status === 'severely_stunted') {
+    return ["$severeStunted", []];
+  }
+  if ($status === 'wasted') {
+    return ["(LOWER(m.$column) LIKE ? AND NOT $severeWasted)", ['%wasted%']];
+  }
+  if ($status === 'severely_wasted') {
+    return ["$severeWasted", []];
+  }
+  if ($status === 'overweight') {
+    return ["(LOWER(m.$column) LIKE ? AND LOWER(m.$column) NOT LIKE ?)", ['%overweight%', '%obese%']];
+  }
+  if ($status === 'obese') {
     return ["LOWER(m.$column) LIKE ?", ['%obese%']];
   }
-  if ($s === 'sam' || $s === 'mam_sam') {
-    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%', '%severe%']];
+  if ($status === 'mam_yellow') {
+    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%mam%', '%yellow%']];
+  }
+  if ($status === 'sam_red') {
+    return ["(LOWER(m.$column) LIKE ? OR LOWER(m.$column) LIKE ?)", ['%sam%', '%red%']];
   }
 
-  // MAM is moderate only.
-  return ["1 = 0", []];
+  return ["LOWER(m.$column) LIKE ?", ['%' . $status . '%']];
 }
 
 function userBarangayConstraint(PDO $pdo, string $role, int $userId): array {
@@ -118,15 +123,11 @@ function userBarangayConstraint(PDO $pdo, string $role, int $userId): array {
   $st->execute([$userId]);
   $barangayId = (int)($st->fetchColumn() ?: 0);
 
-  if ($barangayId <= 0) {
-    return [' AND 1 = 0 ', []];
-  }
-
+  if ($barangayId <= 0) return [' AND 1 = 0 ', []];
   return [' AND b.barangay_id = ? ', [$barangayId]];
 }
 
-[$statusWhere, $statusParams] = statusCondition($column, $status);
-[$severeWhere, $severeParams] = severeCondition($column, $status);
+[$statusWhere, $statusParams] = statusCondition($column, $indicator, $status);
 [$scopeWhere, $scopeParams] = userBarangayConstraint($pdo, $role, $userId);
 
 $sql = "
@@ -134,10 +135,8 @@ $sql = "
     b.barangay_id,
     b.barangay_name,
     b.barangay_code,
-    COUNT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.child_seq END) AS moderate_cases,
-    COUNT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.child_seq END) AS severe_cases,
-    GROUP_CONCAT(DISTINCT CASE WHEN $statusWhere AND NOT ($severeWhere) THEN m.$column END ORDER BY m.$column SEPARATOR ', ') AS moderate_labels,
-    GROUP_CONCAT(DISTINCT CASE WHEN $statusWhere AND ($severeWhere) THEN m.$column END ORDER BY m.$column SEPARATOR ', ') AS severe_labels,
+    COUNT(DISTINCT CASE WHEN $statusWhere THEN m.child_seq END) AS cases,
+    GROUP_CONCAT(DISTINCT CASE WHEN $statusWhere THEN m.$column END ORDER BY m.$column SEPARATOR ', ') AS labels,
     COUNT(DISTINCT m.child_seq) AS measured_children,
     MAX(m.date_measured) AS last_measurement_date
   FROM tbl_barangay b
@@ -148,20 +147,15 @@ $sql = "
   ORDER BY b.barangay_name ASC
 ";
 
-$params = [];
-$params = array_merge($params, $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams, $statusParams, $severeParams, [$year], $scopeParams);
+$params = array_merge($statusParams, $statusParams, [$year], $scopeParams);
 $st = $pdo->prepare($sql);
 $st->execute($params);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($rows as &$r) {
   $r['barangay_id'] = (int)$r['barangay_id'];
-  $r['moderate_cases'] = (int)$r['moderate_cases'];
-  $r['severe_cases'] = (int)$r['severe_cases'];
-  $r['total_cases'] = $r['moderate_cases'] + $r['severe_cases'];
-  $r['moderate_labels'] = $r['moderate_labels'] ?: '';
-  $r['severe_labels'] = $r['severe_labels'] ?: '';
-  $r['weighted_cases'] = $r['moderate_cases'] + ($r['severe_cases'] * 2);
+  $r['cases'] = (int)$r['cases'];
+  $r['labels'] = $r['labels'] ?: '';
   $r['measured_children'] = (int)$r['measured_children'];
 }
 unset($r);
@@ -174,20 +168,16 @@ $yearsSql = "
   WHERE m.date_measured IS NOT NULL $scopeWhere
   ORDER BY y DESC
 ";
-$yearsParams = $scopeParams;
 $yst = $pdo->prepare($yearsSql);
-$yst->execute($yearsParams);
+$yst->execute($scopeParams);
 $years = array_values(array_filter(array_map('intval', $yst->fetchAll(PDO::FETCH_COLUMN))));
-
 if (!$years) $years = [(int)date('Y')];
 
-$response = [
+echo json_encode([
   'ok' => true,
   'indicator' => $indicator,
   'status' => $status,
   'year' => $year,
   'years' => $years,
   'rows' => $rows
-];
-
-echo json_encode($response);
+]);
