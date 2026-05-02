@@ -367,7 +367,7 @@ try {
 
       // Check duplicate child
       $findChild = $pdo->prepare("
-        SELECT child_seq
+        SELECT child_seq, c_firstname, c_lastname, date_birth
         FROM tbl_child_info
         WHERE barangay_id = ?
           AND LOWER(TRIM(c_firstname)) = LOWER(TRIM(?))
@@ -383,7 +383,13 @@ try {
         $dateBirth
       ]);
 
-      $childSeq = (int)($findChild->fetchColumn() ?: 0);
+      $existingChild = $findChild->fetch(PDO::FETCH_ASSOC);
+
+      if ($existingChild) {
+        $childSeq = (int)$existingChild['child_seq'];
+      } else {
+        $childSeq = 0;
+      }
 
       // Insert child if not existing
       if ($childSeq <= 0) {
