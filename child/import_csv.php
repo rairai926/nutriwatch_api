@@ -123,29 +123,72 @@ function split_person_name($fullName) {
     return $result;
   }
 
-  // Format: LASTNAME, FIRSTNAME MIDDLENAME
+  // Normalize spaces
+  $fullName = preg_replace('/\s+/', ' ', $fullName);
+
+  // Known surname connectors (case-insensitive)
+  $connectors = [
+    'de', 'del', 'dela', 'delos', 'de los', 'de la',
+    'van', 'von', 'der', 'den'
+  ];
+
+  // --------------------------
+  // PRIORITY FORMAT: LASTNAME, FIRSTNAME MIDDLENAME
+  // --------------------------
   if (strpos($fullName, ',') !== false) {
     [$lastname, $rest] = array_map('trim', explode(',', $fullName, 2));
 
-    $parts = preg_split('/\s+/', $rest);
-    $firstname = $parts[0] ?? '';
-    $middlename = trim(implode(' ', array_slice($parts, 1)));
+    $parts = explode(' ', $rest);
+
+    if (count($parts) > 1) {
+      $result['firstname'] = implode(' ', array_slice($parts, 0, -1));
+      $result['middlename'] = end($parts);
+    } else {
+      $result['firstname'] = $parts[0];
+    }
 
     $result['lastname'] = $lastname;
-    $result['firstname'] = $firstname;
-    $result['middlename'] = $middlename;
 
     return $result;
   }
 
-  // Format: FIRSTNAME MIDDLENAME LASTNAME
-  $parts = preg_split('/\s+/', $fullName);
+  // --------------------------
+  // AUTO-DETECT COMPOUND LAST NAME
+  // --------------------------
+  $parts = explode(' ', $fullName);
+  $count = count($parts);
 
-  $result['firstname'] = $parts[0] ?? '';
-  $result['lastname'] = count($parts) > 1 ? end($parts) : '';
-  $result['middlename'] = count($parts) > 2
-    ? implode(' ', array_slice($parts, 1, -1))
-    : '';
+  if ($count === 1) {
+    $result['firstname'] = $parts[0];
+    return $result;
+  }
+
+  // Start from last word (assume it's part of lastname)
+  $lastnameParts = [];
+  $lastnameParts[] = array_pop($parts); // last word
+
+  // Check backwards for connectors
+  while (!empty($parts)) {
+    $prev = strtolower($parts[count($parts) - 1]);
+
+    if (in_array($prev, $connectors, true)) {
+      array_unshift($lastnameParts, array_pop($parts));
+    } else {
+      break;
+    }
+  }
+
+  $result['lastname'] = implode(' ', $lastnameParts);
+
+  // Remaining parts = first + middle
+  $remaining = $parts;
+
+  if (count($remaining) >= 2) {
+    $result['firstname'] = implode(' ', array_slice($remaining, 0, -1));
+    $result['middlename'] = end($remaining);
+  } elseif (count($remaining) === 1) {
+    $result['firstname'] = $remaining[0];
+  }
 
   return $result;
 }
