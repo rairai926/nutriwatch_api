@@ -1,5 +1,4 @@
 <?php
-
 ob_start();
 session_start();
 
@@ -31,60 +30,77 @@ if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") {
 require_once __DIR__ . "/../config/db.php";
 require_once __DIR__ . "/../middleware/auth.php";
 
-$authUser = authenticate(['admin', 'user', 'bns']);
+$authUser = authenticate(['admin','user','bns']);
 $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
 function monthLabels() {
-  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 }
 
 $metric = trim($_GET["metric"] ?? "lt_status");
-$allowed = ["lt_status", "weight_status", "height_status", "muac_status"];
-
-if (!in_array($metric, $allowed, true)) {
-  http_response_code(400);
-  echo json_encode(["ok" => false, "message" => "Invalid metric"]);
-  exit;
-}
-
 $year = (int)($_GET["year"] ?? date("Y"));
-if ($year < 2000 || $year > 2100) {
-  $year = (int)date("Y");
-}
-
 $filterBarangayId = (int)($_GET["barangay_id"] ?? 0);
 
 // --------------------
-// Barangay scope
-// Admin: all or selected barangay
-// User/BNS: assigned barangay only
+// STATUS DEFINITIONS
+// --------------------
+function metricStatusList($metric) {
+  if ($metric === 'weight_status') {
+    return [
+      ['name'=>'Normal','patterns'=>['%normal%'],'exclude'=>[]],
+      ['name'=>'Underweight','patterns'=>['%underweight%'],'exclude'=>['%severely underweight%']],
+      ['name'=>'Severely Underweight','patterns'=>['%severely underweight%'],'exclude'=>[]]
+    ];
+  }
+
+  if ($metric === 'height_status') {
+    return [
+      ['name'=>'Normal','patterns'=>['%normal%'],'exclude'=>[]],
+      ['name'=>'Stunted','patterns'=>['%stunted%'],'exclude'=>['%severely stunted%']],
+      ['name'=>'Severely Stunted','patterns'=>['%severely stunted%'],'exclude'=>[]]
+    ];
+  }
+
+  if ($metric === 'lt_status') {
+    return [
+      ['name'=>'Normal','patterns'=>['%normal%'],'exclude'=>[]],
+      ['name'=>'Wasted','patterns'=>['%wasted%'],'exclude'=>['%severely wasted%']],
+      ['name'=>'Severely Wasted','patterns'=>['%severely wasted%'],'exclude'=>[]],
+      ['name'=>'Overweight','patterns'=>['%overweight%'],'exclude'=>['%obese%']],
+      ['name'=>'Obese','patterns'=>['%obese%'],'exclude'=>[]]
+    ];
+  }
+
+  return [
+    ['name'=>'Normal / Green','patterns'=>['%green%','%normal%'],'exclude'=>[]],
+    ['name'=>'MAM / Yellow','patterns'=>['%yellow%','%mam%'],'exclude'=>[]],
+    ['name'=>'SAM / Red','patterns'=>['%red%','%sam%'],'exclude'=>[]]
+  ];
+}
+
+// --------------------
+// BARANGAY SCOPE
 // --------------------
 $scopeWhere = "";
 $scopeParams = [];
 
 if ($role !== 'admin') {
-  $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
+  $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
   $st->execute([$userId]);
   $assignedBarangayId = (int)($st->fetchColumn() ?: 0);
 
   if ($assignedBarangayId <= 0) {
     echo json_encode([
-      "ok" => true,
-      "year" => $year,
-      "barangay_id" => 0,
-      "labels" => monthLabels(),
-      "series" => [
-        ["name" => "Normal", "data" => array_fill(0, 12, 0)],
-        ["name" => "Malnourished", "data" => array_fill(0, 12, 0)]
-      ]
+      "ok"=>true,
+      "labels"=>monthLabels(),
+      "series"=>[]
     ]);
     exit;
   }
 
   $scopeWhere = " AND ci.barangay_id = ? ";
   $scopeParams[] = $assignedBarangayId;
-  $filterBarangayId = $assignedBarangayId;
 } else {
   if ($filterBarangayId > 0) {
     $scopeWhere = " AND ci.barangay_id = ? ";
@@ -93,88 +109,64 @@ if ($role !== 'admin') {
 }
 
 // --------------------
-// Normal expression
+// BUILD SERIES
 // --------------------
-$normalExpr = "LOWER(COALESCE(m.$metric, '')) = 'normal'";
+$labels = monthLabels();
+$series = [];
 
-if ($metric === "muac_status") {
-  $normalExpr = "
-    (
-      LOWER(COALESCE(m.muac_status, '')) LIKE '%green%'
-      OR LOWER(COALESCE(m.muac_status, '')) LIKE '%normal%'
-    )
-  ";
-}
+foreach (metricStatusList($metric) as $def) {
 
-// --------------------
-// Latest measurement per child per month
-// --------------------
-$sql = "
-  SELECT
-    MONTH(m.date_measured) AS mon,
-    SUM(CASE WHEN $normalExpr THEN 1 ELSE 0 END) AS normal_count,
-    SUM(CASE WHEN $normalExpr THEN 0 ELSE 1 END) AS mal_count
-  FROM tbl_measurement m
-  JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
+  $conditions = [];
+  $params = [];
 
-  JOIN (
-    SELECT 
-      child_seq, 
-      MONTH(date_measured) AS mon, 
-      MAX(date_measured) AS max_date
-    FROM tbl_measurement
-    WHERE YEAR(date_measured) = ?
-    GROUP BY child_seq, MONTH(date_measured)
-  ) lm
-    ON lm.child_seq = m.child_seq
-   AND lm.mon = MONTH(m.date_measured)
-   AND lm.max_date = m.date_measured
-
-  JOIN (
-    SELECT 
-      child_seq, 
-      date_measured, 
-      MAX(measure_id) AS max_measure_id
-    FROM tbl_measurement
-    WHERE YEAR(date_measured) = ?
-    GROUP BY child_seq, date_measured
-  ) lt
-    ON lt.child_seq = m.child_seq
-   AND lt.date_measured = m.date_measured
-   AND lt.max_measure_id = m.measure_id
-
-  WHERE YEAR(m.date_measured) = ?
-  $scopeWhere
-
-  GROUP BY MONTH(m.date_measured)
-  ORDER BY MONTH(m.date_measured)
-";
-
-$params = [$year, $year, $year, ...$scopeParams];
-
-$st = $pdo->prepare($sql);
-$st->execute($params);
-$rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-$normal = array_fill(0, 12, 0);
-$mal = array_fill(0, 12, 0);
-
-foreach ($rows as $r) {
-  $idx = (int)$r["mon"] - 1;
-
-  if ($idx >= 0 && $idx < 12) {
-    $normal[$idx] = (int)$r["normal_count"];
-    $mal[$idx] = (int)$r["mal_count"];
+  foreach ($def['patterns'] as $p) {
+    $conditions[] = "LOWER(m.$metric) LIKE ?";
+    $params[] = $p;
   }
+
+  $sqlWhere = "(" . implode(" OR ", $conditions) . ")";
+
+  foreach ($def['exclude'] as $ex) {
+    $sqlWhere .= " AND LOWER(m.$metric) NOT LIKE ?";
+    $params[] = $ex;
+  }
+
+  $sql = "
+    SELECT
+      MONTH(m.date_measured) AS mon,
+      COUNT(DISTINCT m.child_seq) AS cnt
+    FROM tbl_measurement m
+    JOIN tbl_child_info ci ON ci.child_seq = m.child_seq
+    WHERE YEAR(m.date_measured)=?
+      $scopeWhere
+      AND $sqlWhere
+    GROUP BY MONTH(m.date_measured)
+  ";
+
+  $finalParams = array_merge([$year], $scopeParams, $params);
+
+  $st = $pdo->prepare($sql);
+  $st->execute($finalParams);
+
+  $map = [];
+  foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+    $map[(int)$r['mon']] = (int)$r['cnt'];
+  }
+
+  $data = [];
+  for ($i=1;$i<=12;$i++) {
+    $data[] = $map[$i] ?? 0;
+  }
+
+  $series[] = [
+    "name"=>$def['name'],
+    "data"=>$data
+  ];
 }
 
 echo json_encode([
-  "ok" => true,
-  "year" => $year,
-  "barangay_id" => $filterBarangayId,
-  "labels" => monthLabels(),
-  "series" => [
-    ["name" => "Normal", "data" => $normal],
-    ["name" => "Malnourished", "data" => $mal]
-  ]
+  "ok"=>true,
+  "year"=>$year,
+  "labels"=>$labels,
+  "series"=>$series
 ]);
