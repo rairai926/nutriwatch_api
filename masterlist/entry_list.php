@@ -33,27 +33,33 @@ try {
   $role = strtolower($authUser->role ?? 'user');
   $userId = (int)($authUser->sub ?? 0);
 
-  // --------------------
-  // Params
-  // --------------------
   $page  = isset($_GET['page']) ? (int)$_GET['page'] : 1;
   $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
+
   if ($page < 1) $page = 1;
   if ($limit < 1) $limit = 1;
   if ($limit > 100) $limit = 100;
+
   $offset = ($page - 1) * $limit;
 
   $q = trim((string)($_GET['q'] ?? ''));
-  $filter = trim((string)($_GET['filter'] ?? 'all')); // all|eligible|023|2459|measured
-  $allowedFilters = ['all', 'eligible', '023', '2459', 'measured'];
-  if (!in_array($filter, $allowedFilters, true)) $filter = 'all';
+  $filter = trim((string)($_GET['filter'] ?? 'all'));
+  $measurementFilter = trim((string)($_GET['measurement_filter'] ?? 'all'));
 
-  // --------------------
-  // Restrict non-admin to their barangay
-  // --------------------
+  $allowedFilters = ['all', 'eligible', '023', '2459', 'measured'];
+  if (!in_array($filter, $allowedFilters, true)) {
+    $filter = 'all';
+  }
+
+  $allowedMeasurementFilters = ['all', 'monthly', 'quarterly'];
+  if (!in_array($measurementFilter, $allowedMeasurementFilters, true)) {
+    $measurementFilter = 'all';
+  }
+
   $userBarangayId = 0;
+
   if ($role !== 'admin') {
-    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id=? LIMIT 1");
+    $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
     $st->execute([$userId]);
     $userBarangayId = (int)($st->fetchColumn() ?: 0);
 
@@ -62,9 +68,6 @@ try {
     }
   }
 
-  // --------------------
-  // Base WHERE
-  // --------------------
   $where = [];
   $params = [];
 
@@ -79,16 +82,53 @@ try {
       OR COALESCE(ci.date_birth, '') LIKE ?
     )";
     $like = "%{$q}%";
-    array_push($params, $like, $like);
+    $params[] = $like;
+    $params[] = $like;
   }
 
-  $whereSql = $where ? ("WHERE " . implode(" AND ", $where)) : "";
+  /*
+    Age category filters:
+    - 0–23 months = monthly
+    - 24–59 months = quarterly
+  */
+  if ($filter === '023' || $measurementFilter === 'monthly') {
+    $where[] = "TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 0 AND 23";
+  }
 
-  // --------------------
-  // Count
-  // --------------------
-  $countSql = "
-    SELECT COUNT(*)
+  if ($filter === '2459' || $measurementFilter === 'quarterly') {
+    $where[] = "TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 24 AND 59";
+  }
+
+  if ($filter === 'measured') {
+    $where[] = "lm.last_measured IS NOT NULL";
+  }
+
+  /*
+    Eligible filter:
+    - No measurement yet = eligible
+    - 0–23 months = eligible if last measured at least 1 month ago
+    - 24–59 months = eligible if last measured at least 3 months ago
+  */
+  if ($filter === 'eligible') {
+    $where[] = "(
+      TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 0 AND 59
+      AND (
+        lm.last_measured IS NULL
+        OR (
+          TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 0 AND 23
+          AND TIMESTAMPDIFF(MONTH, lm.last_measured, CURDATE()) >= 1
+        )
+        OR (
+          TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 24 AND 59
+          AND TIMESTAMPDIFF(MONTH, lm.last_measured, CURDATE()) >= 3
+        )
+      )
+    )";
+  }
+
+  $whereSql = $where ? "WHERE " . implode(" AND ", $where) : "";
+
+  $baseJoin = "
     FROM tbl_child_info ci
     LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
     LEFT JOIN (
@@ -96,15 +136,18 @@ try {
       FROM tbl_measurement
       GROUP BY child_seq
     ) lm ON lm.child_seq = ci.child_seq
+  ";
+
+  $countSql = "
+    SELECT COUNT(*)
+    $baseJoin
     $whereSql
   ";
+
   $st = $pdo->prepare($countSql);
   $st->execute($params);
   $total = (int)$st->fetchColumn();
 
-  // --------------------
-  // List query
-  // --------------------
   $listSql = "
     SELECT
       ci.child_seq,
@@ -116,13 +159,7 @@ try {
       ci.purok,
       b.barangay_name,
       lm.last_measured AS last_updated
-    FROM tbl_child_info ci
-    LEFT JOIN tbl_barangay b ON b.barangay_id = ci.barangay_id
-    LEFT JOIN (
-      SELECT child_seq, MAX(date_measured) AS last_measured
-      FROM tbl_measurement
-      GROUP BY child_seq
-    ) lm ON lm.child_seq = ci.child_seq
+    $baseJoin
     $whereSql
     ORDER BY
       CASE WHEN lm.last_measured IS NULL THEN 0 ELSE 1 END ASC,
@@ -178,20 +215,6 @@ try {
       }
     }
 
-    // optional filter after computing age/schedule
-    if ($filter === 'eligible' && !$allowedNow) {
-      continue;
-    }
-    if ($filter === '023' && $category !== '0-23 months') {
-      continue;
-    }
-    if ($filter === '2459' && $category !== '24-59 months') {
-      continue;
-    }
-    if ($filter === 'measured' && empty($lastUpdated)) {
-      continue;
-    }
-
     $outRows[] = [
       "child_seq" => (int)$r['child_seq'],
       "c_firstname" => $r['c_firstname'] ?? '',
@@ -217,6 +240,7 @@ try {
     "limit" => $limit,
     "total" => $total,
     "filter" => $filter,
+    "measurement_filter" => $measurementFilter,
     "rows" => array_values($outRows)
   ]);
 } catch (Throwable $e) {
