@@ -24,10 +24,14 @@ $offset = ($page - 1) * $limit;
 $q = trim((string)($_GET['q'] ?? ''));
 $sex = trim((string)($_GET['sex'] ?? ''));
 $measurement = trim((string)($_GET['measurement'] ?? 'all')); // all|with|without
+$schedule = trim((string)($_GET['schedule'] ?? 'all')); // all|monthly|quarterly
 $sort = trim((string)($_GET['sort'] ?? 'latest')); // latest|oldest|name_asc|name_desc
 
 $allowedMeasurement = ['all', 'with', 'without'];
 if (!in_array($measurement, $allowedMeasurement, true)) $measurement = 'all';
+
+$allowedSchedule = ['all', 'monthly', 'quarterly'];
+if (!in_array($schedule, $allowedSchedule, true)) $schedule = 'all';
 
 $allowedSort = ['latest', 'oldest', 'name_asc', 'name_desc'];
 if (!in_array($sort, $allowedSort, true)) $sort = 'latest';
@@ -171,6 +175,12 @@ if ($measurement === 'with') {
   $where[] = "lm.last_measured IS NULL";
 }
 
+if ($schedule === 'monthly') {
+  $where[] = "TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 0 AND 23";
+} elseif ($schedule === 'quarterly') {
+  $where[] = "TIMESTAMPDIFF(MONTH, ci.date_birth, CURDATE()) BETWEEN 24 AND 59";
+}
+
 if ($view === 'updated') {
   $where[] = "lm.last_measured >= ? AND lm.last_measured < ?";
   $params[] = $firstDay;
@@ -243,5 +253,7 @@ echo json_encode([
   "page" => $page,
   "limit" => $limit,
   "total" => $total,
+  "measurement" => $measurement,
+  "schedule" => $schedule,
   "rows" => $rows
 ]);
