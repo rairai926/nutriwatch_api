@@ -4,9 +4,6 @@ session_start();
 
 header("Content-Type: application/json; charset=utf-8");
 
-// --------------------
-// CORS
-// --------------------
 $allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
@@ -39,16 +36,25 @@ $userId = (int)($authUser->sub ?? 0);
 $barangayId = (int)($_GET['barangay_id'] ?? 0);
 $barangayCode = strtoupper(preg_replace('/\s+/u', '', trim($_GET['barangay_code'] ?? '')));
 
+$month = (int)($_GET['month'] ?? date('n'));
+$year = (int)($_GET['year'] ?? date('Y'));
+
+if ($month < 1 || $month > 12) {
+  $month = (int)date('n');
+}
+
+if ($year < 2000 || $year > 2100) {
+  $year = (int)date('Y');
+}
+
 if ($barangayId <= 0 && $barangayCode === '') {
   http_response_code(400);
   echo json_encode(["message" => "barangay_id or barangay_code is required"]);
   exit;
 }
 
-// --------------------
-// Restrict BNS/user to their own barangay
-// --------------------
 $assignedBarangayId = 0;
+
 if ($role !== 'admin') {
   $st = $pdo->prepare("SELECT barangay_id FROM tbl_users WHERE users_id = ? LIMIT 1");
   $st->execute([$userId]);
@@ -61,10 +67,6 @@ if ($role !== 'admin') {
   }
 }
 
-// --------------------
-// Resolve requested barangay
-// Prefer barangay_id, fallback to cleaned barangay_code
-// --------------------
 $barangay = null;
 
 if ($barangayId > 0) {
@@ -110,9 +112,6 @@ if ($role !== 'admin' && $barangayId !== $assignedBarangayId) {
   exit;
 }
 
-// --------------------
-// Latest measurement per child with tie-breaker
-// --------------------
 $sql = "
   SELECT
     ci.child_seq,
@@ -132,6 +131,8 @@ $sql = "
     JOIN (
       SELECT child_seq, MAX(date_measured) AS max_date
       FROM tbl_measurement
+      WHERE MONTH(date_measured) = ?
+        AND YEAR(date_measured) = ?
       GROUP BY child_seq
     ) lm
       ON lm.child_seq = m1.child_seq
@@ -150,7 +151,7 @@ $sql = "
 ";
 
 $st = $pdo->prepare($sql);
-$st->execute([$barangayId]);
+$st->execute([$month, $year, $barangayId]);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 $out = [];
@@ -163,7 +164,7 @@ foreach ($rows as $r) {
   $lt = strtolower(trim((string)($r['lt_status'] ?? '')));
   $muac = strtolower(trim((string)($r['muac_status'] ?? '')));
 
-  $isOverdue = !$lastDate || strtotime($lastDate) < strtotime('-90 days');
+  $isOverdue = !$lastDate;
 
   $isHighRisk =
     in_array($weight, ['underweight', 'severely underweight'], true) ||
@@ -174,7 +175,7 @@ foreach ($rows as $r) {
     str_contains($muac, 'mam') ||
     str_contains($muac, 'sam');
 
-  $statusTag = $isHighRisk ? 'high-risk' : ($isOverdue ? 'overdue' : 'normal');
+  $statusTag = $isHighRisk ? 'high-risk' : ($isOverdue ? 'no-record-this-period' : 'normal');
 
   $out[] = [
     "child_seq" => (int)$r['child_seq'],
@@ -199,5 +200,7 @@ echo json_encode([
   "barangay_id" => $barangayId,
   "barangay_name" => $barangay['barangay_name'],
   "barangay_code" => strtoupper(preg_replace('/\s+/u', '', (string)($barangay['barangay_code'] ?? ''))),
+  "month" => $month,
+  "year" => $year,
   "children" => $out
 ]);

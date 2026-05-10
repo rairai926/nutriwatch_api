@@ -4,9 +4,6 @@ session_start();
 
 header("Content-Type: application/json; charset=utf-8");
 
-// --------------------
-// CORS
-// --------------------
 $allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
@@ -36,9 +33,6 @@ $authUser = authenticate(['admin', 'user', 'bns']);
 $role = strtolower($authUser->role ?? 'user');
 $userId = (int)($authUser->sub ?? 0);
 
-// --------------------
-// Metric requested by frontend
-// --------------------
 $metric = trim($_GET["metric"] ?? "weight_status");
 $allowed = ["weight_status", "height_status", "lt_status", "muac_status"];
 if (!in_array($metric, $allowed, true)) {
@@ -47,7 +41,17 @@ if (!in_array($metric, $allowed, true)) {
   exit;
 }
 
-// If you want BNS to only see their barangay on map, set true:
+$month = (int)($_GET['month'] ?? date('n'));
+$year = (int)($_GET['year'] ?? date('Y'));
+
+if ($month < 1 || $month > 12) {
+  $month = (int)date('n');
+}
+
+if ($year < 2000 || $year > 2100) {
+  $year = (int)date('Y');
+}
+
 $restrictToBarangay = true;
 
 $barangayId = 0;
@@ -63,9 +67,6 @@ if ($role !== 'admin') {
   }
 }
 
-// --------------------
-// MUAC mapping + what counts as "Normal"
-// --------------------
 $labelExpr  = "COALESCE(NULLIF(m.$metric,''),'Unknown')";
 $normalExpr = "LOWER(m.$metric) = 'normal'";
 
@@ -79,19 +80,20 @@ if ($metric === "muac_status") {
       ELSE m.muac_status
     END
   ";
+
   $normalExpr = "(LOWER(m.muac_status) LIKE '%green%' OR LOWER(m.muac_status) LIKE '%normal%')";
 }
 
-// --------------------
-// Latest measurement per child (date + tie-breaker measure_id)
-// --------------------
 $latestJoin = "
   JOIN (
     SELECT child_seq, MAX(date_measured) AS max_date
     FROM tbl_measurement
+    WHERE MONTH(date_measured) = ?
+      AND YEAR(date_measured) = ?
     GROUP BY child_seq
   ) lm
-    ON lm.child_seq = m.child_seq AND lm.max_date = m.date_measured
+    ON lm.child_seq = m.child_seq
+   AND lm.max_date = m.date_measured
 ";
 
 $latestTieBreaker = "
@@ -105,9 +107,6 @@ $latestTieBreaker = "
    AND lt.max_measure_id = m.measure_id
 ";
 
-// --------------------
-// Barangay base list + counts + assigned BNS
-// --------------------
 $whereBarangay = "";
 $params = [];
 
@@ -151,30 +150,26 @@ $st = $pdo->prepare($barangaySql);
 $st->execute($params);
 $barangays = $st->fetchAll(PDO::FETCH_ASSOC);
 
-// output keyed by barangay_id
 $byId = [];
 foreach ($barangays as $b) {
   $id = (int)$b["barangay_id"];
-
   $cleanCode = strtoupper(preg_replace('/\s+/u', '', (string)($b["barangay_code"] ?? "")));
 
   $byId[$id] = [
     "barangay_id" => $id,
     "barangay_code" => $cleanCode,
     "barangay_name" => $b["barangay_name"] ?? "",
-
     "assigned_bns" => $b["assigned_bns"] ?? "",
-
     "total_children" => (int)($b["total_children"] ?? 0),
     "male_children" => (int)($b["male_children"] ?? 0),
     "female_children" => (int)($b["female_children"] ?? 0),
-
     "measured_children" => 0,
     "last_measurement_date" => null,
     "normal_pct" => 0,
     "coverage_pct" => 0,
     "priority_level" => "low",
-
+    "month" => $month,
+    "year" => $year,
     "breakdowns" => [
       $metric => []
     ]
@@ -189,9 +184,6 @@ if (!$byId) {
 $ids = array_keys($byId);
 $placeholders = implode(",", array_fill(0, count($ids), "?"));
 
-// --------------------
-// Breakdown counts per barangay (latest per child)
-// --------------------
 $metricSql = "
   SELECT
     ci.barangay_id,
@@ -206,13 +198,16 @@ $metricSql = "
   GROUP BY ci.barangay_id, label
 ";
 
+$metricParams = array_merge([$month, $year], $ids);
+
 $st = $pdo->prepare($metricSql);
-$st->execute($ids);
+$st->execute($metricParams);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 $tmpAgg = [];
 foreach ($rows as $r) {
   $bid = (int)$r["barangay_id"];
+
   if (!isset($tmpAgg[$bid])) {
     $tmpAgg[$bid] = ["measured" => 0, "last" => null, "breakdown" => []];
   }
@@ -230,9 +225,6 @@ foreach ($rows as $r) {
   ];
 }
 
-// --------------------
-// Normal counts per barangay (latest per child)
-// --------------------
 $normalSql = "
   SELECT
     ci.barangay_id,
@@ -245,8 +237,10 @@ $normalSql = "
   GROUP BY ci.barangay_id
 ";
 
+$normalParams = array_merge([$month, $year], $ids);
+
 $st = $pdo->prepare($normalSql);
-$st->execute($ids);
+$st->execute($normalParams);
 $normalRows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 $normalMap = [];
@@ -254,13 +248,10 @@ foreach ($normalRows as $nr) {
   $normalMap[(int)$nr["barangay_id"]] = (int)$nr["normal_count"];
 }
 
-// --------------------
-// Merge
-// --------------------
 foreach ($byId as $bid => &$out) {
   if (isset($tmpAgg[$bid])) {
     $measured = (int)$tmpAgg[$bid]["measured"];
-    $normal   = (int)($normalMap[$bid] ?? 0);
+    $normal = (int)($normalMap[$bid] ?? 0);
 
     $coverage = $out["total_children"] > 0
       ? round(($measured / $out["total_children"]) * 100, 1)
